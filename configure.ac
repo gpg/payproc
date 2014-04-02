@@ -130,7 +130,7 @@ AM_PATH_GPG_ERROR("$NEED_GPG_ERROR_VERSION",
 AM_PATH_NPTH("$NEED_NPTH_API:$NEED_NPTH_VERSION",have_npth=yes,have_npth=no)
 if test "$have_npth" = "yes"; then
   # We define this macro because some code parts require it.
-  AC_DEFINE(USE_NPTH, 1,
+  AC_DEFINE(HAVE_NPTH, 1,
               [Defined if the New Portable Thread Library is available])
 else
   AC_MSG_WARN([[
@@ -139,6 +139,7 @@ else
 *** we need the New Portable Threads Library.
 ***]])
 fi
+AC_DEFINE(USE_NPTH, 1, [Defined to use New Portable Thread Library])
 
 #
 # GNUTLS
@@ -199,6 +200,48 @@ AC_CHECK_FUNCS([strerror strlwr])
 
 # For http.c
 AC_CHECK_FUNCS([strtoull])
+
+# Check for the getsockopt SO_PEERCRED
+AC_MSG_CHECKING(for SO_PEERCRED)
+AC_CACHE_VAL(payproc_cv_sys_so_peercred,
+      [AC_TRY_COMPILE([#include <sys/socket.h>],
+         [struct ucred cr;
+          int cl = sizeof cr;
+          getsockopt (1, SOL_SOCKET, SO_PEERCRED, &cr, &cl);],
+          payproc_cv_sys_so_peercred=yes,
+          payproc_cv_sys_so_peercred=no)
+       ])
+AC_MSG_RESULT($payproc_cv_sys_so_peercred)
+
+if test $payproc_cv_sys_so_peercred = yes; then
+  AC_DEFINE(HAVE_SO_PEERCRED, 1,
+            [Defined if SO_PEERCRED is supported (Linux specific)])
+else
+  # Check for the getsockopt LOCAL_PEEREID (NetBSD)
+  AC_MSG_CHECKING(for LOCAL_PEEREID)
+  AC_CACHE_VAL(payproc_cv_sys_so_local_peereid,
+      [AC_TRY_COMPILE([#include <sys/socket.>
+         #include <sys/un.h>],
+         [struct unpcbid unp;
+          int unpl = sizeof unp;
+          getsockopt (1, SOL_SOCKET, LOCAL_PEEREID, &unp, &unpl);],
+          payproc_cv_sys_so_local_peereid=yes,
+          payproc_cv_sys_so_local_peereid=no)
+       ])
+  AC_MSG_RESULT($payproc_cv_sys_so_local_peereid)
+
+  if test $payproc_cv_sys_so_local_peereid = yes; then
+    AC_DEFINE(HAVE_LOCAL_PEEREID, 1,
+              [Defined if LOCAL_PEEREID is supported (NetBSD specific)])
+  else
+    # (Open)Solaris
+    AC_CHECK_FUNCS([getpeerucred], AC_CHECK_HEADERS([ucred.h]))
+    if test $ac_cv_func_getpeerucred != yes; then
+        # FreeBSD
+        AC_CHECK_FUNCS([getpeereid])
+    fi
+  fi
+fi
 
 
 #

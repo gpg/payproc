@@ -28,6 +28,8 @@ typedef struct conn_s *conn_t;
 conn_t new_connection_obj (void);
 void init_connection_obj (conn_t conn, int fd);
 void release_connection_obj (conn_t conn);
+unsigned int id_from_connection_obj (conn_t conn);
+int fd_from_connection_obj (conn_t conn);
 
 void connection_handler (conn_t conn);
 

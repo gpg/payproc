@@ -34,16 +34,39 @@
 /* Maximum length of an input line.  */
 #define MAX_LINELEN  2048
 
+/* Helper macro for the cmd_ handlers.  */
+#define set_error(a,b)                          \
+  do {                                          \
+    err = gpg_error (GPG_ERR_ ## a);            \
+    conn->errdesc = (b);                        \
+  } while (0)
+
 
 /* Object describing a connection.  */
 struct conn_s
 {
+  unsigned int idno;     /* Connection id for logging.  */
   int fd;                /* File descriptor for this connection.  */
   estream_t stream;      /* The corresponding stream object.  */
   char *command;         /* The command line (malloced). */
   keyvalue_t dataitems;  /* The data items.  */
+  const char *errdesc;   /* Optional description of an error.  */
 };
 
+
+/* The list of supported currencies  */
+static struct
+{
+  const char *name;
+  unsigned char decdigits;
+  const char *desc;
+} currency_table[] = {
+  { "USD", 2, "US Dollar" },
+  { "EUR", 2, "Euro" },
+  { "GBP", 2, "British Pound" },
+  { "JPY", 0, "Yen" },
+  { NULL }
+};
 
 
 
@@ -52,7 +75,16 @@ struct conn_s
 conn_t
 new_connection_obj (void)
 {
-  return xtrycalloc (1, sizeof (struct conn_s));
+  static unsigned int counter;
+  conn_t conn;
+
+  conn = xtrycalloc (1, sizeof *conn);
+  if (conn)
+    {
+      conn->idno = ++counter;
+      conn->fd = -1;
+    }
+  return conn;
 }
 
 /* Initialize a connection object which has been alloacted with
@@ -82,17 +114,41 @@ release_connection_obj (conn_t conn)
 }
 
 
+/* Return the file descriptor for the conenction CONN.  */
+int
+fd_from_connection_obj (conn_t conn)
+{
+  return conn->fd;
+}
+
+
+unsigned int
+id_from_connection_obj (conn_t conn)
+{
+  return conn->idno;
+}
+
+
 /* Transform a data line name into a standard capitalized format; e.g.
    "Content-Type".  Conversion stops at the colon.  As usual we don't
-   use the localized versions of ctype.h. */
+   use the localized versions of ctype.h.  Parts inside of brackets
+   ([]) are not changed. */
 static void
 capitalize_name (char *name)
 {
   int first = 1;
+  int bracket = 0;
 
   for (; *name && *name != ':'; name++)
     {
-      if (*name == '-')
+      if (bracket)
+        {
+          if (*name == ']')
+            bracket--;
+        }
+      else if (*name == '[')
+        bracket++;
+      else if (*name == '-')
         first = 1;
       else if (first)
         {
@@ -120,11 +176,16 @@ store_data_line (conn_t conn, char *line)
     {
       /* Continuation.  */
       if (!conn->dataitems)
-        return GPG_ERR_PROTOCOL_VIOLATION;
+        return gpg_error (GPG_ERR_PROTOCOL_VIOLATION);
       return keyvalue_append_to_last (conn->dataitems, line);
     }
 
+  /* A name must start with a letter.  Note that for items used only
+     internally a name may start with an underscore. */
   capitalize_name (line);
+  if (*line < 'A' || *line > 'Z')
+    return gpg_error (GPG_ERR_INV_NAME);
+
   p = strchr (line, ':');
   if (!p)
     return GPG_ERR_PROTOCOL_VIOLATION;
@@ -254,7 +315,80 @@ read_request (conn_t conn)
 }
 
 
-/* The CARDTOKEN command creates a token for a card.  The follwing
+
+/*
+ * Helper functions.
+ */
+
+/* Check that the currency described by STRING is valid.  Returns true
+   if so.  The number of of digits after the decimal point for that
+   currency is stored at R_DECDIGITS.  */
+static int
+valid_currency_p (const char *string, int *r_decdigits)
+{
+  int i;
+
+  for (i=0; currency_table[i].name; i++)
+    if (!strcasecmp (string, currency_table[i].name))
+      {
+        *r_decdigits = currency_table[i].decdigits;
+        return 1;
+      }
+  return 0;
+}
+
+
+/* Check the amount given in STRING and convert it to the smallest
+   currency unit.  DECDIGITS gives the number of allowed post decimal
+   positions.  Return 0 on error or the converted amount.  */
+static unsigned int
+convert_amount (const char *string, int decdigits)
+{
+  const char *s;
+  int ndots = 0;
+  int nfrac = 0;
+  unsigned int value = 0;
+  unsigned int v;
+
+  if (*string == '+')
+    string++; /* Skip an optioanl leading plsu sign.  */
+  for (s = string; *s; s++)
+    {
+      if (*s == '.')
+        {
+          if (!decdigits)
+            return 0; /* Post decimal digits are not allowed.  */
+          if (++ndots > 1)
+            return 0; /* Too many decimal points.  */
+        }
+      else if (!strchr ("0123456789", *s))
+        return 0;
+      else if (ndots && ++nfrac > decdigits)
+        return 0; /* Too many post decimal digits.  */
+      else
+        {
+          v = 10*value + (*s - '0');
+          if (v < value)
+            return 0; /* Overflow.  */
+          value = v;
+        }
+    }
+
+  for (; nfrac < decdigits; nfrac++)
+    {
+      v = 10*value;
+      if (v < value)
+        return 0; /* Overflow.  */
+      value = v;
+    }
+
+  return value;
+}
+
+
+
+
+/* The CARDTOKEN command creates a token for a card.  The following
    values are expected in the dataitems:
 
    Number:     The number of the card
@@ -265,7 +399,7 @@ read_request (conn_t conn)
 
    On success these items are returned:
 
-   Token:     The once time use token
+   Token:     The one time use token
    Last4:     The last 4 digits of the card for display
    Live:      f in test mode, t in live mode.
 
@@ -274,15 +408,49 @@ static gpg_error_t
 cmd_cardtoken (conn_t conn, char *args)
 {
   gpg_error_t err;
+  keyvalue_t dict = conn->dataitems;
   keyvalue_t result = NULL;
   keyvalue_t kv;
+  const char *s;
+  int aint;
 
   (void)args;
 
+  s = keyvalue_get_string (dict, "Number");
+  if (!*s)
+    {
+      set_error (MISSING_VALUE, "Credit card number not given");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Exp-Year");
+  if (!*s || (aint = atoi (s)) < 2014 || aint > 2199 )
+    {
+      set_error (INV_VALUE, "Expiration year out of range");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Exp-Month");
+  if (!*s || (aint = atoi (s)) < 1 || aint > 12 )
+    {
+      set_error (INV_VALUE, "Invalid expiration month");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Cvc");
+  if (!*s || (aint = atoi (s)) < 100 || aint > 9999 )
+    {
+      set_error (INV_VALUE, "The CVC has not 2 or 4 digits");
+      goto leave;
+    }
+
+
   err = stripe_create_card_token (conn->dataitems, &result);
 
+ leave:
   if (err)
-    es_fprintf (conn->stream, "ERR %d (%s)\n", err, gpg_strerror (err));
+    es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                conn->errdesc? conn->errdesc : gpg_strerror (err));
   else
     es_fprintf (conn->stream, "OK\n");
   for (kv = result; kv; kv = kv->next)
@@ -293,6 +461,137 @@ cmd_cardtoken (conn_t conn, char *args)
 }
 
 
+
+/* The CHARGECARD command charges the given amount to a card.  The
+   following values are expected in the dataitems:
+
+   Amount:     The amount to charge with optional decimal fraction.
+   Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+   Card-Token: The token returned by the CARDTOKEN command.
+   Capture:    Optional; defaults to true.  If set to false
+               this command creates only an authorization.
+               The command CAPTURECHARGE must then be used
+               to actually charge the card. [currently ignored]
+   Desc:       Optional description of the charge.
+   Stmt-Desc:  Optional string to be displayed on the credit
+               card statement.  Will be truncated at about 15 characters.
+   Email:      Optional contact mail address of the customer
+   Meta[NAME]: Meta data further described by NAME.  This is used convey
+               application specific data to the log file.
+
+   On success these items are returned:
+
+   Charge-Id:  The ID describing this charge
+   Live:       f in test mode, t in live mode.
+   Currency:   The currency of the charge.
+   Amount:     The charged amount with optional decimal fraction.
+
+ */
+static gpg_error_t
+cmd_chargecard (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  keyvalue_t dict = conn->dataitems;
+  keyvalue_t result = NULL;
+  keyvalue_t kv;
+  const char *s;
+  unsigned int cents;
+  int decdigs;
+
+  (void)args;
+
+  /* Get currency and amount.  */
+  s = keyvalue_get_string (dict, "Currency");
+  if (!valid_currency_p (s, &decdigs))
+    {
+      set_error (MISSING_VALUE, "Currency missing or not supported");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Amount");
+  if (!*s || !(cents = convert_amount (s, decdigs)))
+    {
+      set_error (MISSING_VALUE, "Amount missing or invalid");
+      goto leave;
+    }
+  err = keyvalue_putf (&conn->dataitems, "_amount", "%u", cents);
+  dict = conn->dataitems;
+  if (err)
+    goto leave;
+
+  /* We only support the use of a card token and no direct supply of
+     card details.  This makes it easies to protect or audit the
+     actual credit card data.  The token may only be used once.  */
+  s = keyvalue_get_string (dict, "Card-Token");
+  if (!*s)
+    {
+      set_error (MISSING_VALUE, "Card-Token missing");
+      goto leave;
+    }
+
+  /* Let's ask Stripe to process it.  */
+  err = stripe_charge_card (conn->dataitems, &result);
+
+ leave:
+  if (err)
+    es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                conn->errdesc? conn->errdesc : gpg_strerror (err));
+  else
+    es_fprintf (conn->stream, "OK\n");
+  for (kv = result; kv; kv = kv->next)
+    es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
+  keyvalue_release (result);
+
+  return err;
+}
+
+
+
+/* GETINFO is a multipurpose command to return certain config data. It
+   requires a subcommand:
+
+     list-currencies
+
+
+ */
+static gpg_error_t
+cmd_getinfo (conn_t conn, char *args)
+{
+  int i;
+
+  if (has_leading_keyword (args, "list-currencies"))
+    {
+      es_fputs ("OK\n", conn->stream);
+      for (i=0; currency_table[i].name; i++)
+        es_fprintf (conn->stream, "# %s - %s\n",
+                    currency_table[i].name, currency_table[i].desc);
+    }
+  else
+    {
+      es_fputs ("ERR 1 (Unknown sub-command)\n"
+                "# Supported sub-commands are:\n"
+                "#   list-currencies  - List supported currencies\n"
+                , conn->stream);
+    }
+
+  return 0;
+}
+
+
+/* Process a PING command.  */
+static gpg_error_t
+cmd_ping (conn_t conn, char *args)
+{
+  if (*args)
+    es_fprintf (conn->stream, "OK %s\n",args);
+  else
+    es_fputs ("OK pong\n", conn->stream);
+
+  return 0;
+}
+
+
+
 /* The handler serving a connection.  */
 void
 connection_handler (conn_t conn)
@@ -317,13 +616,20 @@ connection_handler (conn_t conn)
       es_fprintf (conn->stream, "ERR %u %s\n", err, gpg_strerror (err));
       return;
     }
+  es_fflush (conn->stream);
 
   if ((cmdargs = has_leading_keyword (conn->command, "CARDTOKEN")))
     err = cmd_cardtoken (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "CHARGECARD")))
+    err = cmd_chargecard (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "GETINFO")))
+    err = cmd_getinfo (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "PING")))
+    err = cmd_ping (conn, cmdargs);
   else
     {
       es_fprintf (conn->stream, "ERR 1 (Unknown command)\n");
-      es_fprintf (conn->stream, "CMD: '%s'\n", conn->command);
+      es_fprintf (conn->stream, "_cmd: %s\n", conn->command);
       for (kv = conn->dataitems; kv; kv = kv->next)
         es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
     }

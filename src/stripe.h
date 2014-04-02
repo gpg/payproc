@@ -21,6 +21,7 @@
 #define STRIPE_H
 
 gpg_error_t stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result);
+gpg_error_t stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result);
 
 
 #endif /*STRIPE_H*/

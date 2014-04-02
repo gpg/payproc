@@ -30,19 +30,21 @@ utility_sources = \
 	http.c http.h \
 	cJSON.c cJSON.h \
 	membuf.c membuf.h \
-	strlist.c strlist.h
+	strlist.c strlist.h \
+	argparse.c argparse.h
 
 payprocd_SOURCES = \
 	payprocd.c payprocd.h \
 	connection.c connection.h \
 	stripe.c stripe.h \
 	tlssupport.c tlssupport.h \
+	cred.c cred.h \
 	$(utility_sources)
 
 noinst_PROGRAMS = $(module_tests) t-http
 TESTS = $(module_tests)
 
-module_tests =
+module_tests = t-connection
 
 AM_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGNUTLS_CFLAGS)
 LDADD  = -lm $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGNUTLS_LIBS)
@@ -55,3 +57,7 @@ t_common_ldadd   = $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGNUTLS_LIBS) -lm
 t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
+
+t_connection_SOURCES = t-connection.c stripe.c $(t_common_sources)
+t_connection_CFLAGS  = $(t_common_cflags)
+t_connection_LDADD   = $(t_common_ldadd)

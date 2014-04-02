@@ -71,6 +71,16 @@
                   } while(0)
 #define wipememory(_ptr,_len) wipememory2(_ptr,0,_len)
 
+/* Macros to replace ctype ones to avoid locale problems. */
+#define spacep(p)   (*(p) == ' ' || *(p) == '\t')
+#define digitp(p)   (*(p) >= '0' && *(p) <= '9')
+#define hexdigitp(a) (digitp (a)                     \
+                      || (*(a) >= 'A' && *(a) <= 'F')  \
+                      || (*(a) >= 'a' && *(a) <= 'f'))
+/* Note this isn't identical to a C locale isspace() without \f and
+   \v, but works for the purposes used here. */
+#define ascii_isspace(a) ((a)==' ' || (a)=='\n' || (a)=='\r' || (a)=='\t')
+
 
 /* The default error source of the application.  This is different
    from GPG_ERR_SOURCE_DEFAULT in that it does not depend on the
@@ -91,6 +101,7 @@ char *strconcat (const char *s1, ...) JNLIB_GCC_A_SENTINEL(0);
 
 
 char *has_leading_keyword (const char *string, const char *keyword);
+char *trim_spaces (char *str);
 
 
 /* Object to store a key value pair.  */

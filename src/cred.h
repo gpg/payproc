@@ -1,4 +1,4 @@
-/* payprocd.h - Declarations for payprocd
+/* cred.h - Definitions pertaining to credentials.
  * Copyright (C) 2014 g10 Code GmbH
  *
  * This file is part of Payproc.
@@ -17,21 +17,10 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef PAYPROCD_H
-#define PAYPROCD_H
+#ifndef CRED_H
+#define CRED_H
+
+int credentials_from_socket (int fd, pid_t *r_pid, uid_t *r_uid, gid_t *r_gid);
 
 
-/* The global options.  */
-struct
-{
-  int verbose;   /* Verbose logging.  */
-  int nodetach;  /* Do not detach from the console.  */
-
-  int livemode;  /* Expect to be in live mode.  Default is test mode.  */
-  char *stripe_secret_key;  /* The secret key for stripe.com */
-
-} opt;
-
-
-
-#endif /*PAYPROCD_H*/
+#endif /*CRED_H*/

@@ -190,7 +190,7 @@ call_stripe (const char *keystring, const char *method, const char *data,
 }
 
 
-
+/* The implementation of CARDTOKEN.  */
 gpg_error_t
 stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
 {
@@ -253,7 +253,7 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
     }
 
 
-  err = call_stripe ("sk_test_z1tnxBb2WbySaJBpuszRdzDn:",
+  err = call_stripe (opt.stripe_secret_key,
                      "tokens", NULL, query, &status, &json);
   log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
   if (!err)
@@ -292,6 +292,130 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
     err = keyvalue_put (r_result, "Last4", j_last4->valuestring);
   if (!err)
     err = keyvalue_put (r_result, "Token", j_id->valuestring);
+
+ leave:
+  keyvalue_release (query);
+  cJSON_Delete (json);
+  return err;
+}
+
+
+/* The implementation of CHARGECARD.  */
+gpg_error_t
+stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
+{
+  gpg_error_t err;
+  int status;
+  keyvalue_t query = NULL;
+  cjson_t json = NULL;
+  const char *s;
+  cjson_t j_obj;
+
+  *r_result = NULL;
+
+  s = keyvalue_get_string (dict, "Currency");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&query, "currency", s);
+  if (err)
+    goto leave;
+
+  /* _amount is the amount in the smallest unit of the currency.  */
+  s = keyvalue_get_string (dict, "_amount");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&query, "amount", s);
+  if (err)
+    goto leave;
+
+  s = keyvalue_get_string (dict, "Card-Token");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&query, "card", s);
+  if (err)
+    goto leave;
+
+  s = keyvalue_get_string (dict, "Desc");
+  if (*s)
+    {
+      err = keyvalue_put (&query, "description", s);
+      if (err)
+        goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Stmt-Desc");
+  if (*s)
+    {
+      err = keyvalue_put (&query, "statement_description", s);
+      if (err)
+        goto leave;
+    }
+
+
+  err = call_stripe (opt.stripe_secret_key,
+                     "charges", NULL, query, &status, &json);
+  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
+  if (!err)
+    log_debug ("Result:\n%s\n", cJSON_Print(json));
+  if (status != 200)
+    {
+      log_error ("charge_card: error: status=%u\n", status);
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+  j_obj = cJSON_GetObjectItem (json, "id");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      log_error ("charge_card: bad or missing 'id'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_put (r_result, "Charge-Id", j_obj->valuestring);
+  if (err)
+    goto leave;
+
+  j_obj = cJSON_GetObjectItem (json, "livemode");
+  if (!j_obj || !(cjson_is_boolean (j_obj)))
+    {
+      log_error ("charge_card: bad or missing 'livemode'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_put (r_result, "Live", cjson_is_true (j_obj)?"t":"f");
+  if (err)
+    goto leave;
+
+  j_obj = cJSON_GetObjectItem (json, "currency");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      log_error ("charge_card: bad or missing 'currency'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_put (r_result, "Currency", j_obj->valuestring);
+  if (err)
+    goto leave;
+
+  j_obj = cJSON_GetObjectItem (json, "amount");
+  if (!j_obj || !cjson_is_number (j_obj))
+    {
+      log_error ("charge_card: bad or missing 'amount'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_putf (r_result, "_amount", "%d", j_obj->valueint);
+  if (err)
+    goto leave;
 
  leave:
   keyvalue_release (query);

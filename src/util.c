@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <ctype.h>
 
 #include "util.h"
 #include "estream.h"
@@ -161,6 +162,36 @@ has_leading_keyword (const char *string, const char *keyword)
 }
 
 
+/*
+ * Remove leading and trailing white space from STR.  Return STR.
+ */
+char *
+trim_spaces (char *str)
+{
+  char *string, *p, *mark;
+
+  string = str;
+  /* Find first non space character.  */
+  for( p=string; *p && isspace (*(unsigned char*)p) ; p++ )
+    ;
+  /* Move characters. */
+  for (mark = NULL; (*string = *p); string++, p++ )
+    {
+      if (isspace (*(unsigned char*)p))
+        {
+          if (!mark)
+            mark = string;
+        }
+      else
+        mark = NULL;
+    }
+  if (mark)
+    *mark = '\0' ;  /* Remove trailing spaces. */
+
+  return str;
+}
+
+
 
 keyvalue_t
 keyvalue_create (const char *key, const char *value)
@@ -206,6 +237,9 @@ keyvalue_put (keyvalue_t *list, const char *key, const char *value)
 {
   keyvalue_t kv;
 
+  if (!key || !*key || !value)
+    return gpg_error (GPG_ERR_INV_VALUE);
+
   kv = keyvalue_create (key, value);
   if (!kv)
     return gpg_error_from_syserror ();
@@ -221,6 +255,9 @@ keyvalue_putf (keyvalue_t *list, const char *key, const char *format, ...)
   va_list arg_ptr;
   char *value;
   keyvalue_t kv;
+
+  if (!key || !*key)
+    return gpg_error (GPG_ERR_INV_VALUE);
 
   va_start (arg_ptr, format);
   value = es_vasprintf (format, arg_ptr);

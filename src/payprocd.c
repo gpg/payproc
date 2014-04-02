@@ -33,9 +33,11 @@
 
 #include "util.h"
 #include "logging.h"
+#include "argparse.h"
 #include "estream.h"
 #include "connection.h"
 #include "tlssupport.h"
+#include "cred.h"
 #include "payprocd.h"
 
 
@@ -44,8 +46,6 @@
 
 /* The interval in seconds for the housekeeping thread.  */
 #define TIMERTICK_INTERVAL  60
-
-
 
 /* Flag indicating that the socket shall shall be removed by
    cleanup.  */
@@ -57,12 +57,45 @@ static int shutdown_pending;
 /* Number of active connections.  */
 static int active_connections;
 
+/* Constants to identify the options. */
+enum opt_values
+  {
+    aNull = 0,
+    oVerbose	= 'v',
+    oAllowUID   = 'U',
+    oAllowGID   = 'G',
+
+    oLogFile   = 500,
+    oNoDetach,
+    oStripeKey,
+    oLive,
+
+    oLast
+  };
+
+
+/* The list of commands and options. */
+static ARGPARSE_OPTS opts[] = {
+  ARGPARSE_group (301, "@Options:\n "),
+
+  ARGPARSE_s_n (oVerbose,  "verbose",   "verbose"),
+  ARGPARSE_s_n (oNoDetach, "no-detach", "do not detach from the console"),
+  ARGPARSE_s_s (oLogFile,  "log-file",  "|FILE|write log output to FILE"),
+  ARGPARSE_s_s (oAllowUID, "allow-uid", "|N|allow access from uid N"),
+  ARGPARSE_s_s (oAllowGID, "allow-gid", "|N|allow access from gid N"),
+  ARGPARSE_s_s (oStripeKey,
+                "stripe-key", "|FILE|read key for Stripe account from FILE"),
+  ARGPARSE_s_n (oLive, "live",  "enable live mode"),
+
+  ARGPARSE_end ()
+};
+
 
 
 
 /* Local prototypes.  */
 static void cleanup (void);
-static void launch_server (void);
+static void launch_server (const char *logfile);
 static void server_loop (int fd);
 static void handle_signal (int signo);
 static void *connection_thread (void *arg);
@@ -70,18 +103,66 @@ static void *connection_thread (void *arg);
 
 
 
+static const char *
+my_strusage( int level )
+{
+  const char *p;
+
+  switch (level)
+    {
+    case 11: p = "payprocd"; break;
+    case 13: p = PACKAGE_VERSION; break;
+    case 19: p = "Please report bugs to bugs@g10code.com.\n"; break;
+    case 1:
+    case 40: p = "Usage: payprocd [options] (-h for help)"; break;
+    case 41: p = ("Syntax: payprocd [options]\n"
+                  "Start the payment processing daemon\n"); break;
+    default: p = NULL; break;
+    }
+  return p;
+}
+
+/* Set the Stripe secret key from file FNAME.  */
+static void
+set_stripe_key (const char *fname)
+{
+  FILE *fp;
+  char buf[128];
+
+  fp = fopen (fname, "r");
+  if (!fp)
+    log_error ("error opening key file '%s': %s\n", fname, strerror (errno));
+  else
+    {
+      if (!fgets (buf, sizeof buf, fp))
+        log_error ("error reading key from '%s': %s\n",
+                   fname, strerror (errno));
+      else
+        {
+          trim_spaces (buf);
+          if (strncmp (buf, "sk_test_", 8) && strncmp (buf, "sk_live_", 8))
+            log_error ("file '%s' seems not to carry a Stripe secret key\n",
+                       fname);
+          else
+            {
+              xfree (opt.stripe_secret_key);
+              opt.stripe_secret_key = xstrdup (buf);
+            }
+        }
+      fclose (fp);
+    }
+}
+
+
 int
 main (int argc, char **argv)
 {
-  const char *logfile = NULL;/*"tmp/payprocd.log";*/
-
-  (void)argc;
-  (void)argv;
-  opt.verbose = 1;
-  opt.nodetach = 1;
+  ARGPARSE_ARGS pargs;
+  const char *logfile = NULL;
 
   /* Set program name etc.  */
-  log_set_prefix ("payprocd", JNLIB_LOG_WITH_PREFIX|JNLIB_LOG_WITH_PID);
+  set_strusage (my_strusage);
+  log_set_prefix ("payprocd", JNLIB_LOG_WITH_PREFIX);
 
   /* Make sure that our subsystems are ready.  */
   es_init ();
@@ -107,16 +188,42 @@ main (int argc, char **argv)
   /* Initialze processing subsystems.  */
   init_tls_subsystem ();
 
-  /* Now start with logging to a file if this is desired. */
-  if (logfile)
+  /* Parse the command line. */
+  pargs.argc  = &argc;
+  pargs.argv  = &argv;
+  pargs.flags = ARGPARSE_FLAG_KEEP;
+  while (optfile_parse (NULL, NULL, NULL, &pargs, opts))
     {
-      log_set_file (logfile);
-      log_set_prefix (NULL, (JNLIB_LOG_WITH_PREFIX
-                             |JNLIB_LOG_WITH_TIME
-                             |JNLIB_LOG_WITH_PID));
+      switch (pargs.r_opt)
+        {
+        case oVerbose:  opt.verbose++; break;
+        case oNoDetach: opt.nodetach = 1; break;
+        case oLogFile:  logfile = pargs.r.ret_str; break;
+        case oAllowUID: /*FIXME*/ break;
+        case oAllowGID: /*FIXME*/ break;
+        case oStripeKey: set_stripe_key (pargs.r.ret_str); break;
+        case oLive: opt.livemode = 1; break;
+
+        default: pargs.err = ARGPARSE_PRINT_ERROR; break;
+	}
     }
 
-  launch_server ();
+  if (opt.livemode && (!opt.stripe_secret_key
+                       || strncmp (opt.stripe_secret_key, "sk_live_", 8)))
+    log_error ("live mode requested but no live key given\n");
+  else if (!opt.livemode
+           && opt.stripe_secret_key
+           && !strncmp (opt.stripe_secret_key, "sk_live_", 8))
+    log_error ("test mode requested but live key given\n");
+
+  if (log_get_errorcount (0))
+    exit (2);
+
+  if (opt.livemode)
+    log_fatal ("live mode rejected - we need more testing first\n");
+
+  /* Start the server.  */
+  launch_server (logfile);
 
   return 0;
 }
@@ -141,29 +248,63 @@ cleanup (void)
 static int
 already_running_p (const char *name)
 {
-  /* int rc; */
-  /* char *infostr, *p; */
-  /* int prot, pid; */
+  struct sockaddr_un *addr;
+  socklen_t len;
+  int rc;
+  int fd;
+  estream_t stream;
+  char buffer[256];
 
-  /* rc = assuan_new (&ctx); */
-  /* if (! rc) */
-  /*   rc = assuan_socket_connect (ctx, infostr, pid, 0); */
-  /* xfree (infostr); */
-  /* if (rc) */
-  /*   { */
-  /*     if (!mode && !silent) */
-  /*       log_error ("can't connect to the agent: %s\n", gpg_strerror (rc)); */
+  fd = socket (AF_UNIX, SOCK_STREAM, 0);
+  if (fd == -1)
+    {
+      log_error ("error creating socket: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      exit (2);
+    }
 
-  /*     if (ctx) */
-  /*       assuan_release (ctx); */
-  /*     return -1; */
-  /*   } */
+  addr = xcalloc (1, sizeof *addr);
+  addr->sun_family = AF_UNIX;
+  if (strlen (name) + 1 >= sizeof (addr->sun_path))
+    {
+      log_error ("socket name '%s' is too long\n", name);
+      exit (2);
+    }
+  strcpy (addr->sun_path, name);
+  len = SUN_LEN (addr);
 
-  /* if (!opt.quiet && !silent) */
-  /*   log_info ("gpg-agent running and available\n"); */
+  rc = connect (fd, (struct sockaddr *)addr, len);
+  if (rc == -1)
+    {
+      close (fd);
+      return 0; /* Probably not running.  Well, as long as the
+                   permissions are suitable.  */
+    }
 
-  /* assuan_release (ctx); */
-  return 0;
+  /* Also do an alive check for diagnositc reasons.  */
+  stream = es_fdopen (fd, "r+b");
+  if (!stream)
+    {
+      log_error ("failed to fdopen connected socket: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      close (fd);
+      return 1;  /* Assume it is running.  */
+    }
+  es_fputs ("PING\n\n", stream);
+  es_fflush (stream);
+  if (!es_fgets (buffer, sizeof buffer, stream))
+    {
+      log_error ("failed to read PING response from '%s': %s\n", name,
+                 gpg_strerror (gpg_error_from_syserror()));
+    }
+  else if (!has_leading_keyword (buffer, "OK"))
+    {
+      log_error ("PING command on '%s' failed *%s)\n", name, buffer);
+    }
+
+  es_fclose (stream);
+
+  return 1;  /* Assume the server is running.  */
 }
 
 
@@ -200,11 +341,8 @@ create_socket (char *name)
     {
       if (already_running_p (name))
         {
-          log_set_prefix (NULL, JNLIB_LOG_WITH_PREFIX);
-          log_set_file (NULL);
           log_error ("a payprocd process is already running - "
                      "not starting a new one\n");
-          *name = 0; /* Inhibit removal of the socket by cleanup(). */
           close (fd);
           exit (2);
         }
@@ -237,12 +375,9 @@ create_socket (char *name)
 }
 
 
-
-
-
 /* Fire up the server.  */
 static void
-launch_server (void)
+launch_server (const char *logfile)
 {
   int fd;
   pid_t pid;
@@ -268,6 +403,17 @@ launch_server (void)
   */
 
   remove_socket_flag = 1;
+
+  if (logfile)
+    {
+      log_set_file (logfile);
+      log_set_prefix (NULL, (JNLIB_LOG_WITH_PREFIX
+                             |JNLIB_LOG_WITH_TIME
+                             |JNLIB_LOG_WITH_PID));
+    }
+  else
+    log_set_prefix (NULL, (JNLIB_LOG_WITH_PREFIX
+                           |JNLIB_LOG_WITH_PID));
 
   /* Detach from tty and put process into a new session */
   if (!opt.nodetach )
@@ -505,16 +651,28 @@ static void *
 connection_thread (void *arg)
 {
   conn_t conn = arg;
+  pid_t pid;
+  uid_t uid;
+  gid_t gid;
+
+  if (credentials_from_socket (fd_from_connection_obj (conn), &pid, &uid, &gid))
+    {
+      log_error ("connection %u: credentials missing - closing\n",
+                 id_from_connection_obj (conn));
+      goto leave;
+    }
 
   if (opt.verbose)
-    log_info ("handler 0x%lx for %p started\n",
-              (unsigned long) npth_self (), conn);
+    log_info ("connection %u: started - pid=%u uid=%u gid=%u\n",
+              id_from_connection_obj (conn),
+              (unsigned int)pid, (unsigned int)uid, (unsigned int)gid);
 
   connection_handler (conn);
-  if (opt.verbose)
-    log_info ("handler 0x%lx for %p terminated\n",
-              (unsigned long) npth_self (), conn);
 
+  if (opt.verbose)
+    log_info ("connection %u: terminated\n", id_from_connection_obj (conn));
+
+ leave:
   release_connection_obj (conn);
   return NULL;
 }
