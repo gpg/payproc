@@ -1,0 +1,13 @@
+No ChangeLog files in Git!
+==========================
+
+Do create any ChangeLog files in the Git repository.  A top-level
+ChangeLog file wil be build from git logs at "make dist" time.  As
+such, there are strict requirements on the form of the commit log
+messages.  See doc/HACKING for details.
+
+
+Local Variables:
+buffer-read-only: t
+mode: text
+End:
