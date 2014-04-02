@@ -26,6 +26,9 @@
 #ifdef __cplusplus
 extern "C"
 {
+#if 0 /*(to make Emacs auto-indent happy)*/
+}
+#endif
 #endif
 
 /* cJSON Types: */
@@ -61,18 +64,21 @@ typedef struct cJSON
   char *string;
 } cJSON;
 
-typedef struct cJSON_Hooks {
-      void *(*malloc_fn)(size_t sz);
-      void (*free_fn)(void *ptr);
-} cJSON_Hooks;
+typedef struct cJSON *cjson_t;
 
-/* Supply malloc, realloc and free functions to cJSON */
-extern void cJSON_InitHooks(cJSON_Hooks* hooks);
-
+/* Macros to test the type of an object.  */
+#define cjson_is_boolean(a) (!((a)->type & ~1))
+#define cjson_is_false(a)   ((a)->type == cJSON_False)
+#define cjson_is_true(a)    ((a)->type == cJSON_True)
+#define cjson_is_null(a)    ((a)->type == cJSON_NULL)
+#define cjson_is_number(a)  ((a)->type == cJSON_Number)
+#define cjson_is_string(a)  ((a)->type == cJSON_String)
+#define cjson_is_array(a)   ((a)->type == cJSON_Array)
+#define cjson_is_object(a)  ((a)->type == cJSON_Object)
 
 /* Supply a block of JSON, and this returns a cJSON object you can
    interrogate. Call cJSON_Delete when finished. */
-extern cJSON *cJSON_Parse(const char *value);
+extern cJSON *cJSON_Parse(const char *value, size_t *r_erroff);
 
 /* Render a cJSON entity to text for transfer/storage. Free the char*
    when finished. */
@@ -86,7 +92,7 @@ extern char  *cJSON_PrintUnformatted(cJSON *item);
 extern void   cJSON_Delete(cJSON *c);
 
 /* Returns the number of items in an array (or object). */
-extern int	  cJSON_GetArraySize(cJSON *array);
+extern int    cJSON_GetArraySize(cJSON *array);
 
 /* Retrieve item number "item" from array "array". Returns NULL if
    unsuccessful. */
@@ -94,12 +100,6 @@ extern cJSON *cJSON_GetArrayItem(cJSON *array,int item);
 
 /* Get item "string" from object. Case insensitive. */
 extern cJSON *cJSON_GetObjectItem(cJSON *object,const char *string);
-
-/* For analysing failed parses. This returns a pointer to the parse
-   error. You'll probably need to look a few chars back to make sense
-   of it. Defined when cJSON_Parse() returns 0. 0 when cJSON_Parse()
-   succeeds. */
-extern const char *cJSON_GetErrorPtr(void);
 
 /* These calls create a cJSON item of the appropriate type. */
 extern cJSON *cJSON_CreateNull(void);
@@ -154,7 +154,8 @@ extern cJSON *cJSON_Duplicate(cJSON *item,int recurse);
    parsed. */
 extern cJSON *cJSON_ParseWithOpts(const char *value,
                                   const char **return_parse_end,
-                                  int require_null_terminated);
+                                  int require_null_terminated,
+                                  size_t *r_erroff);
 
 extern void cJSON_Minify(char *json);
 
