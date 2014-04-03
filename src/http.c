@@ -88,6 +88,7 @@
 #endif
 #ifdef HTTP_USE_GNUTLS
 # include <gnutls/gnutls.h>
+# include <gnutls/x509.h>
 #endif /*HTTP_USE_GNUTLS*/
 #ifdef HTTP_USE_POLARSSL
 # error Support for PolarSSL has not yet been added
@@ -217,14 +218,18 @@ struct cookie_s
 };
 typedef struct cookie_s *cookie_t;
 
-static gpg_error_t (*tls_callback) (http_t, http_session_t, int);
-
 /* The session object. */
 struct http_session_s
 {
 #ifdef HTTP_USE_GNUTLS
   gnutls_certificate_credentials_t certcred;
   gnutls_session_t tls_session;
+  struct {
+    int done;      /* Verifciation has been done.  */
+    int rc;        /* GnuTLS verification return code.  */
+    unsigned int status; /* Verification status.  */
+  } verify;
+  char *servername; /* Malloced server name.  */
 #else
   int dummy;
 #endif
@@ -262,6 +267,12 @@ struct http_context_s
   header_t headers;      /* Received headers. */
 };
 
+
+/* The global callback for the verification fucntion.  */
+static gpg_error_t (*tls_callback) (http_t, http_session_t, int);
+
+/* The list of files with trusted CA certificates.  */
+static strlist_t tls_ca_certlist;
 
 
 
@@ -462,6 +473,20 @@ http_register_tls_callback (gpg_error_t (*cb)(http_t, http_session_t, int))
 }
 
 
+/* Register a CA certificate for future use.  The certificate is
+   expected to be in FNAME.  PEM format is assume if FNAME has a
+   suffix of ".pem" */
+void
+http_register_tls_ca (const char *fname)
+{
+  strlist_t sl;
+
+  sl = add_to_strlist (&tls_ca_certlist, fname);
+  if (*sl->d && !strcmp (sl->d + strlen (sl->d) - 4, ".pem"))
+    sl->flags = 1;
+}
+
+
 /* Create a new session object which is currently used to enable TLS
    support.  It may eventually allow reusing existing connections.  */
 gpg_error_t
@@ -480,6 +505,7 @@ http_session_new (http_session_t *r_session, const char *tls_priority)
   {
     const char *errpos;
     int rc;
+    strlist_t sl;
 
     rc = gnutls_certificate_allocate_credentials (&sess->certcred);
     if (rc < 0)
@@ -488,6 +514,16 @@ http_session_new (http_session_t *r_session, const char *tls_priority)
                    gnutls_strerror (rc));
         err = gpg_error (GPG_ERR_GENERAL);
         goto leave;
+      }
+
+    for (sl = tls_ca_certlist; sl; sl = sl->next)
+      {
+        rc = gnutls_certificate_set_x509_trust_file
+          (sess->certcred, sl->d,
+           (sl->flags & 1)? GNUTLS_X509_FMT_PEM : GNUTLS_X509_FMT_DER);
+        if (rc < 0)
+          log_info ("setting CA from file '%s' failed: %s\n",
+                    sl->d, gnutls_strerror (rc));
       }
 
     rc = gnutls_init (&sess->tls_session, GNUTLS_CLIENT);
@@ -544,6 +580,7 @@ http_session_release (http_session_t sess)
     gnutls_deinit (sess->tls_session);
   if (sess->certcred)
     gnutls_certificate_free_credentials (sess->certcred);
+  xfree (sess->servername);
 #endif /*HTTP_USE_GNUTLS*/
 
   xfree (sess);
@@ -1265,6 +1302,14 @@ send_request (http_t hd, const char *auth,
     {
       int rc;
 
+      xfree (hd->session->servername);
+      hd->session->servername = xtrystrdup (server);
+      if (!hd->session->servername)
+        {
+          err = gpg_err_make (default_errsource, gpg_err_code_from_syserror ());
+          return err;
+        }
+
       rc = gnutls_server_name_set (hd->session->tls_session,
                                    GNUTLS_NAME_DNS,
                                    server, strlen (server));
@@ -1369,6 +1414,7 @@ send_request (http_t hd, const char *auth,
 
       if (tls_callback)
         {
+          hd->session->verify.done = 0;
           err = tls_callback (hd, hd->session, 0);
           if (err)
             {
@@ -2294,4 +2340,108 @@ cookie_close (void *cookie)
 
   xfree (c);
   return 0;
+}
+
+
+
+
+/* Verify the credentials of the server.  Returns 0 on success and
+   store the result in the session object.  */
+gpg_error_t
+http_verify_server_credentials (http_session_t sess)
+{
+#ifdef HTTP_USE_GNUTLS
+  static const char const errprefix[] = "TLS verification of peer failed";
+  int rc;
+  unsigned int status;
+  const char *hostname;
+  const gnutls_datum_t *certlist;
+  unsigned int certlistlen;
+  gnutls_x509_crt_t cert;
+
+  sess->verify.done = 1;
+  sess->verify.status = 0;
+  sess->verify.rc = GNUTLS_E_CERTIFICATE_ERROR;
+
+  if (gnutls_certificate_type_get (sess->tls_session) != GNUTLS_CRT_X509)
+    {
+      log_error ("%s: %s\n", errprefix, "not an X.509 certificate");
+      sess->verify.rc = GNUTLS_E_UNSUPPORTED_CERTIFICATE_TYPE;
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  rc = gnutls_certificate_verify_peers2 (sess->tls_session, &status);
+  if (rc)
+    {
+      log_error ("%s: %s\n", errprefix, gnutls_strerror (rc));
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+  if (status)
+    {
+      log_error ("%s: status=0x%04x\n", errprefix, status);
+      sess->verify.status = status;
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  hostname = sess->servername;
+  if (!hostname || !strchr (hostname, '.'))
+    {
+      log_error ("%s: %s\n", errprefix, "hostname missing");
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  certlist = gnutls_certificate_get_peers (sess->tls_session, &certlistlen);
+  if (!certlistlen)
+    {
+      log_error ("%s: %s\n", errprefix, "server did not send a certificate");
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  /* log_debug ("Server sent %u certs\n", certlistlen); */
+  /* { */
+  /*   int i; */
+  /*   char fname[50]; */
+  /*   FILE *fp; */
+
+  /*   for (i=0; i < certlistlen; i++) */
+  /*     { */
+  /*       snprintf (fname, sizeof fname, "xc_%d.der", i); */
+  /*       fp = fopen (fname, "wb"); */
+  /*       if (!fp) */
+  /*         log_fatal ("Failed to create '%s'\n", fname); */
+  /*       if (fwrite (certlist[i].data, certlist[i].size, 1, fp) != 1) */
+  /*         log_fatal ("Error writing to '%s'\n", fname); */
+  /*       fclose (fp); */
+  /*     } */
+  /* } */
+
+  rc = gnutls_x509_crt_init (&cert);
+  if (rc < 0)
+    {
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  rc = gnutls_x509_crt_import (cert, &certlist[0], GNUTLS_X509_FMT_DER);
+  if (rc < 0)
+    {
+      log_error ("%s: %s: %s\n", errprefix, "error importing certificate",
+                 gnutls_strerror (rc));
+      gnutls_x509_crt_deinit (cert);
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  if (!gnutls_x509_crt_check_hostname (cert, hostname))
+    {
+      log_error ("%s: %s\n", errprefix, "hostname does not match");
+      gnutls_x509_crt_deinit (cert);
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  gnutls_x509_crt_deinit (cert);
+  sess->verify.rc = 0;
+  return 0;  /* Verification succeeded.  */
+#else /*!HTTP_USE_GNUTLS*/
+  (void)sess;
+  return gpg_error (GPG_ERR_NOT_IMPLEMENTED);
+#endif
 }

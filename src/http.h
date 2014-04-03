@@ -91,6 +91,7 @@ struct http_context_s;
 typedef struct http_context_s *http_t;
 
 void http_register_tls_callback (gpg_error_t (*cb)(http_t,http_session_t,int));
+void http_register_tls_ca (const char *fname);
 
 gpg_error_t http_session_new (http_session_t *r_session,
                               const char *tls_priority);
@@ -135,6 +136,7 @@ estream_t http_get_write_ptr (http_t hd);
 unsigned int http_get_status_code (http_t hd);
 const char *http_get_header (http_t hd, const char *name);
 const char **http_get_header_names (http_t hd);
+gpg_error_t http_verify_server_credentials (http_session_t sess);
 
 char *http_escape_string (const char *string, const char *specials);
 char *http_escape_data (const void *data, size_t datalen, const char *specials);

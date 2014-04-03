@@ -43,7 +43,7 @@
 
 #ifdef HTTP_USE_GNUTLS
 # include <gnutls/gnutls.h>
-static gnutls_dh_params_t dh_params;
+/* static gnutls_dh_params_t dh_params; */
 #endif /*HTTP_USE_GNUTLS*/
 
 
@@ -97,10 +97,8 @@ static gpg_error_t
 verify_callback (http_t hd, http_session_t session, int reserved)
 {
   (void)hd;
-  (void)session;
   (void)reserved;
-  log_info ("verification of certificates skipped\n");
-  return 0;
+  return http_verify_server_credentials (session);
 }
 
 
@@ -137,6 +135,9 @@ main (int argc, char **argv)
   if (rc)
     log_error ("gnutls_global_init failed: %s\n", gnutls_strerror (rc));
 
+  http_register_tls_callback (verify_callback);
+  http_register_tls_ca ("tls-ca.pem");
+
   err = http_session_new (&session, NULL);
   if (err)
     log_error ("http_session_new failed: %s\n", gpg_strerror (err));
@@ -158,7 +159,6 @@ main (int argc, char **argv)
   /* gnutls_global_set_log_level (2); */
 
 #endif /*HTTP_USE_GNUTLS*/
-  http_register_tls_callback (verify_callback);
 
   rc = http_parse_uri (&uri, *argv, 1);
   if (rc)

@@ -39,10 +39,8 @@ static gpg_error_t
 verify_callback (http_t hd, http_session_t session, int reserved)
 {
   (void)hd;
-  (void)session;
   (void)reserved;
-  log_info ("verification of certificates skipped\n");
-  return 0;
+  return http_verify_server_credentials (session);
 }
 
 
@@ -57,6 +55,7 @@ init_tls_subsystem (void)
     log_fatal ("gnutls_global_init failed: %s\n", gnutls_strerror (rc));
 
   http_register_tls_callback (verify_callback);
+  http_register_tls_ca ("/etc/payproc/tls-ca.pem");
 }
 
 /* Deinitialize the TLS subsystem.  Thisis intended to be run from an
