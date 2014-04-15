@@ -617,6 +617,75 @@ cmd_chargecard (conn_t conn, char *args)
 
 
 
+/* The CHECKAMOUNT command checks whether a given amount is within the
+   configured limits for payment.  It may eventually provide
+   additional options.  The following values are expected in the
+   dataitems:
+
+   Amount:     The amount to check with optional decimal fraction.
+   Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+
+   On success these items are returned:
+
+   _amount:    The amount converted to an integer (i.e. 10.42 EUR -> 1042)
+   Amount:     The amount as above.
+   Limit:      If given, the maximum amount acceptable
+
+ */
+static gpg_error_t
+cmd_checkamount (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  keyvalue_t dict = conn->dataitems;
+  keyvalue_t kv;
+  const char *s;
+  unsigned int cents;
+  int decdigs;
+
+  (void)args;
+
+  /* Delete items, we want to set.  */
+  keyvalue_del (conn->dataitems, "Limit");
+
+  /* Get currency and amount.  */
+  s = keyvalue_get_string (dict, "Currency");
+  if (!valid_currency_p (s, &decdigs))
+    {
+      set_error (MISSING_VALUE, "Currency missing or not supported");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Amount");
+  if (!*s || !(cents = convert_amount (s, decdigs)))
+    {
+      set_error (MISSING_VALUE, "Amount missing or invalid");
+      goto leave;
+    }
+  err = keyvalue_putf (&conn->dataitems, "_amount", "%u", cents);
+  dict = conn->dataitems;
+  if (err)
+    goto leave;
+
+ leave:
+  if (err)
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+    }
+  else
+    {
+      es_fprintf (conn->stream, "OK\n");
+      write_data_line (keyvalue_find (conn->dataitems, "_amount"),
+                       conn->stream);
+    }
+  for (kv = conn->dataitems; kv; kv = kv->next)
+    if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+      write_data_line (kv, conn->stream);
+  return err;
+}
+
+
+
 /* GETINFO is a multipurpose command to return certain config data. It
    requires a subcommand.  See the online help for a list of
    subcommands.
@@ -699,6 +768,8 @@ connection_handler (conn_t conn)
     err = cmd_cardtoken (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "CHARGECARD")))
     err = cmd_chargecard (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "CHECKAMOUNT")))
+    err = cmd_checkamount (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "GETINFO")))
     err = cmd_getinfo (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "PING")))
