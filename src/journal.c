@@ -229,7 +229,7 @@ start_record (char type)
 {
   estream_t fp;
 
-  fp = es_fopenmem (0, "w+");
+  fp = es_fopenmem (0, "w+,samethread");
   if (!fp)
     {
       log_error ("error creating new memory stream for the journal: %s\n",

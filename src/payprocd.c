@@ -286,7 +286,7 @@ already_running_p (const char *name)
     }
 
   /* Also do an alive check for diagnositc reasons.  */
-  stream = es_fdopen (fd, "r+b");
+  stream = es_fdopen (fd, "r+b,samethread");
   if (!stream)
     {
       log_error ("failed to fdopen connected socket: %s\n",

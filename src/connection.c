@@ -49,6 +49,8 @@ struct conn_s
   unsigned int idno;     /* Connection id for logging.  */
   int fd;                /* File descriptor for this connection.  */
   estream_t stream;      /* The corresponding stream object.  */
+                         /* N.B. The stream object mayl only be used
+                            by the connection thread.  */
   char *command;         /* The command line (malloced). */
   keyvalue_t dataitems;  /* The data items.  */
   const char *errdesc;   /* Optional description of an error.  */
@@ -738,7 +740,7 @@ cmd_ping (conn_t conn, char *args)
 
 
 
-/* The handler serving a connection.  */
+/* The handler serving a connection. */
 void
 connection_handler (conn_t conn)
 {
@@ -746,7 +748,7 @@ connection_handler (conn_t conn)
   keyvalue_t kv;
   char *cmdargs;
 
-  conn->stream = es_fdopen_nc (conn->fd, "r+");
+  conn->stream = es_fdopen_nc (conn->fd, "r+,samethread");
   if (!conn->stream)
     {
       err = gpg_error_from_syserror ();
