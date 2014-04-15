@@ -38,6 +38,7 @@
 #include "connection.h"
 #include "tlssupport.h"
 #include "cred.h"
+#include "journal.h"
 #include "payprocd.h"
 
 
@@ -67,6 +68,7 @@ enum opt_values
 
     oLogFile   = 500,
     oNoDetach,
+    oJournal,
     oStripeKey,
     oLive,
 
@@ -83,6 +85,7 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_s_s (oLogFile,  "log-file",  "|FILE|write log output to FILE"),
   ARGPARSE_s_s (oAllowUID, "allow-uid", "|N|allow access from uid N"),
   ARGPARSE_s_s (oAllowGID, "allow-gid", "|N|allow access from gid N"),
+  ARGPARSE_s_s (oJournal,  "journal",   "|FILE|write the journal to FILE"),
   ARGPARSE_s_s (oStripeKey,
                 "stripe-key", "|FILE|read key for Stripe account from FILE"),
   ARGPARSE_s_n (oLive, "live",  "enable live mode"),
@@ -199,6 +202,7 @@ main (int argc, char **argv)
         case oVerbose:  opt.verbose++; break;
         case oNoDetach: opt.nodetach = 1; break;
         case oLogFile:  logfile = pargs.r.ret_str; break;
+        case oJournal:  jrnl_set_file (pargs.r.ret_str); break;
         case oAllowUID: /*FIXME*/ break;
         case oAllowGID: /*FIXME*/ break;
         case oStripeKey: set_stripe_key (pargs.r.ret_str); break;
@@ -463,6 +467,7 @@ launch_server (const char *logfile)
   }
 
   log_info ("payprocd %s started\n", PACKAGE_VERSION);
+  jrnl_store_sys_record ("payprocd "PACKAGE_VERSION" started");
   server_loop (fd);
   close (fd);
 }
@@ -592,8 +597,9 @@ server_loop (int listen_fd)
 	}
     }
 
-  cleanup ();
+  jrnl_store_sys_record ("payprocd "PACKAGE_VERSION" stopped");
   log_info ("payprocd %s stopped\n", PACKAGE_VERSION);
+  cleanup ();
   npth_attr_destroy (&tattr);
 }
 
@@ -627,6 +633,8 @@ handle_signal (int signo)
       if (shutdown_pending > 2)
         {
           log_info ("shutdown forced\n");
+          jrnl_store_sys_record ("payprocd "PACKAGE_VERSION
+                                 " stopped (forced)");
           log_info ("payprocd %s stopped\n", PACKAGE_VERSION);
           cleanup ();
           exit (0);
@@ -635,6 +643,7 @@ handle_signal (int signo)
 
     case SIGINT:
       log_info ("SIGINT received - immediate shutdown\n");
+      jrnl_store_sys_record ("payprocd "PACKAGE_VERSION" stopped (SIGINT)");
       log_info( "payprocd %s stopped\n", PACKAGE_VERSION);
       cleanup ();
       exit (0);

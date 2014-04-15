@@ -1,4 +1,4 @@
-/* stripe.h - Definitions to access the strip.com service
+/* journal.h - Definition for journal realted functions
  * Copyright (C) 2014 g10 Code GmbH
  *
  * This file is part of Payproc.
@@ -17,11 +17,12 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef STRIPE_H
-#define STRIPE_H
+#ifndef JOURNAL_H
+#define JOURNAL_H
 
-gpg_error_t stripe_create_card_token (keyvalue_t *dict);
-gpg_error_t stripe_charge_card (keyvalue_t *dict);
+void jrnl_set_file (const char *fname);
+void jrnl_store_sys_record (const char *text);
+void jrnl_store_charge_record (keyvalue_t dict);
 
 
-#endif /*STRIPE_H*/
+#endif /*JOURNAL_H*/

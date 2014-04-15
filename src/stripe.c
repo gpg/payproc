@@ -135,8 +135,6 @@ call_stripe (const char *keystring, const char *method, const char *data,
       if (err)
         goto leave;
 
-      log_debug ("formdata: '%s'\n", escaped);
-
       es_fprintf (fp,
                   "Content-Type: application/x-www-form-urlencoded\r\n"
                   "Content-Length: %zu\r\n", strlen (escaped));
@@ -154,7 +152,6 @@ call_stripe (const char *keystring, const char *method, const char *data,
     }
 
   status = http_get_status_code (http);
-  log_info ("get '%s' status=%u\n", url, status);
   *r_status = status;
   if ((status / 100) == 2 || (status / 100) == 4)
     {
@@ -190,9 +187,80 @@ call_stripe (const char *keystring, const char *method, const char *data,
 }
 
 
+/* Extract the error information from JSON and put useful stuff into
+   DICT.  */
+static gpg_error_t
+extract_error_from_json (keyvalue_t *dict, cjson_t json)
+{
+  gpg_error_t err;
+  cjson_t j_error, j_obj;
+  const char *type, *mesg, *code;
+
+  j_error = cJSON_GetObjectItem (json, "error");
+  if (!j_error || !cjson_is_object (j_error))
+    {
+      log_error ("stripe: no proper error object returned\n");
+      return 0; /* Ooops. */
+    }
+
+  j_obj = cJSON_GetObjectItem (j_error, "type");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      log_error ("stripe: error object has no 'type'\n");
+      return 0; /* Ooops. */
+    }
+  type = j_obj->valuestring;
+
+  j_obj = cJSON_GetObjectItem (j_error, "message");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      if (j_obj)
+        log_error ("stripe: error object has no proper 'message'\n");
+      mesg = "";
+    }
+  else
+    mesg = j_obj->valuestring;
+
+  j_obj = cJSON_GetObjectItem (j_error, "code");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      if (j_obj)
+        log_error ("stripe: error object has no proper 'code'\n");
+      code = "";
+    }
+  else
+    code = j_obj->valuestring;
+
+  log_info ("stripe: error: type='%s' code='%s' mesg='%.100s'\n",
+            type, code, mesg);
+
+  if (!strcmp (type, "invalid_request_error"))
+    {
+      err = keyvalue_put (dict, "failure", "invalid request to stripe");
+    }
+  else if (!strcmp (type, "api_error"))
+    {
+      err = keyvalue_put (dict, "failure", "bad request to stripe");
+    }
+  else if (!strcmp (type, "card_error"))
+    {
+      err = keyvalue_put (dict, "failure", *code? code : "card error");
+      if (!err && *mesg)
+        err = keyvalue_put (dict, "failure-mesg", mesg);
+    }
+  else
+    {
+      log_error ("stripe: unknown type '%s' in error object\n", type);
+      err = keyvalue_put (dict, "failure", "unknown error");
+    }
+
+  return err;
+}
+
+
 /* The implementation of CARDTOKEN.  */
 gpg_error_t
-stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
+stripe_create_card_token (keyvalue_t *dict)
 {
   gpg_error_t err;
   int status;
@@ -202,9 +270,7 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
   int aint;
   cjson_t j_id, j_livemode, j_card, j_last4;
 
-  *r_result = NULL;
-
-  s = keyvalue_get_string (dict, "Number");
+  s = keyvalue_get_string (*dict, "Number");
   if (!*s)
     {
       err = gpg_error (GPG_ERR_MISSING_VALUE);
@@ -213,8 +279,9 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
   err = keyvalue_put (&query, "card[number]", s);
   if (err)
     goto leave;
+  keyvalue_del (*dict, "Number");
 
-  s = keyvalue_get_string (dict, "Exp-Year");
+  s = keyvalue_get_string (*dict, "Exp-Year");
   if (!*s || (aint = atoi (s)) < 2014 || aint > 2199 )
     {
       err = gpg_error (GPG_ERR_INV_VALUE);
@@ -223,8 +290,9 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
   err = keyvalue_putf (&query, "card[exp_year]", "%d", aint);
   if (err)
     goto leave;
+  keyvalue_del (*dict, "Exp-Year");
 
-  s = keyvalue_get_string (dict, "Exp-Month");
+  s = keyvalue_get_string (*dict, "Exp-Month");
   if (!*s || (aint = atoi (s)) < 1 || aint > 12 )
     {
       err = gpg_error (GPG_ERR_INV_VALUE);
@@ -233,8 +301,9 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
   err = keyvalue_putf (&query, "card[exp_month]", "%d", aint);
   if (err)
     goto leave;
+  keyvalue_del (*dict, "Exp-Month");
 
-  s = keyvalue_get_string (dict, "Cvc");
+  s = keyvalue_get_string (*dict, "Cvc");
   if (!*s || (aint = atoi (s)) < 100 || aint > 9999 )
     {
       err = gpg_error (GPG_ERR_INV_VALUE);
@@ -243,8 +312,9 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
   err = keyvalue_putf (&query, "card[cvc]", "%d", aint);
   if (err)
     goto leave;
+  keyvalue_del (*dict, "Cvc");
 
-  s = keyvalue_get_string (dict, "Name");
+  s = keyvalue_get_string (*dict, "Name");
   if (*s)
     {
       err = keyvalue_put (&query, "card[name]", s);
@@ -256,12 +326,14 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
   err = call_stripe (opt.stripe_secret_key,
                      "tokens", NULL, query, &status, &json);
   log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
-  if (!err)
-    log_debug ("Result:\n%s\n", cJSON_Print(json));
+  if (err)
+    goto leave;
   if (status != 200)
     {
       log_error ("create_card_token: error: status=%u\n", status);
-      err = gpg_error (GPG_ERR_GENERAL);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
   j_id = cJSON_GetObjectItem (json, "id");
@@ -287,11 +359,11 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
       goto leave;
     }
 
-  err = keyvalue_put (r_result, "Live", cjson_is_true (j_livemode)?"t":"f");
+  err = keyvalue_put (dict, "Live", cjson_is_true (j_livemode)?"t":"f");
   if (!err)
-    err = keyvalue_put (r_result, "Last4", j_last4->valuestring);
+    err = keyvalue_put (dict, "Last4", j_last4->valuestring);
   if (!err)
-    err = keyvalue_put (r_result, "Token", j_id->valuestring);
+    err = keyvalue_put (dict, "Token", j_id->valuestring);
 
  leave:
   keyvalue_release (query);
@@ -302,18 +374,16 @@ stripe_create_card_token (keyvalue_t dict, keyvalue_t *r_result)
 
 /* The implementation of CHARGECARD.  */
 gpg_error_t
-stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
+stripe_charge_card (keyvalue_t *dict)
 {
   gpg_error_t err;
   int status;
   keyvalue_t query = NULL;
   cjson_t json = NULL;
   const char *s;
-  cjson_t j_obj;
+  cjson_t j_obj, j_tmp;
 
-  *r_result = NULL;
-
-  s = keyvalue_get_string (dict, "Currency");
+  s = keyvalue_get_string (*dict, "Currency");
   if (!*s)
     {
       err = gpg_error (GPG_ERR_MISSING_VALUE);
@@ -324,7 +394,7 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
     goto leave;
 
   /* _amount is the amount in the smallest unit of the currency.  */
-  s = keyvalue_get_string (dict, "_amount");
+  s = keyvalue_get_string (*dict, "_amount");
   if (!*s)
     {
       err = gpg_error (GPG_ERR_MISSING_VALUE);
@@ -334,7 +404,7 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
   if (err)
     goto leave;
 
-  s = keyvalue_get_string (dict, "Card-Token");
+  s = keyvalue_get_string (*dict, "Card-Token");
   if (!*s)
     {
       err = gpg_error (GPG_ERR_MISSING_VALUE);
@@ -343,8 +413,9 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
   err = keyvalue_put (&query, "card", s);
   if (err)
     goto leave;
+  keyvalue_del (*dict, "Card-Token");
 
-  s = keyvalue_get_string (dict, "Desc");
+  s = keyvalue_get_string (*dict, "Desc");
   if (*s)
     {
       err = keyvalue_put (&query, "description", s);
@@ -352,7 +423,7 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
         goto leave;
     }
 
-  s = keyvalue_get_string (dict, "Stmt-Desc");
+  s = keyvalue_get_string (*dict, "Stmt-Desc");
   if (*s)
     {
       err = keyvalue_put (&query, "statement_description", s);
@@ -364,12 +435,15 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
   err = call_stripe (opt.stripe_secret_key,
                      "charges", NULL, query, &status, &json);
   log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
-  if (!err)
-    log_debug ("Result:\n%s\n", cJSON_Print(json));
+  if (err)
+    goto leave;
+  /* log_debug ("Result:\n%s\n", cJSON_Print(json)); */
   if (status != 200)
     {
       log_error ("charge_card: error: status=%u\n", status);
-      err = gpg_error (GPG_ERR_GENERAL);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
 
@@ -380,7 +454,14 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
       err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  err = keyvalue_put (r_result, "Charge-Id", j_obj->valuestring);
+  err = keyvalue_put (dict, "Charge-Id", j_obj->valuestring);
+  if (err)
+    goto leave;
+
+  j_obj = cJSON_GetObjectItem (json, "balance_transaction");
+  err = keyvalue_put (dict, "balance-transaction",
+                      ((j_obj && cjson_is_string (j_obj))?
+                       j_obj->valuestring : NULL));
   if (err)
     goto leave;
 
@@ -391,7 +472,7 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
       err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  err = keyvalue_put (r_result, "Live", cjson_is_true (j_obj)?"t":"f");
+  err = keyvalue_put (dict, "Live", cjson_is_true (j_obj)?"t":"f");
   if (err)
     goto leave;
 
@@ -402,7 +483,7 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
       err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  err = keyvalue_put (r_result, "Currency", j_obj->valuestring);
+  err = keyvalue_put (dict, "Currency", j_obj->valuestring);
   if (err)
     goto leave;
 
@@ -413,9 +494,17 @@ stripe_charge_card (keyvalue_t dict, keyvalue_t *r_result)
       err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  err = keyvalue_putf (r_result, "_amount", "%d", j_obj->valueint);
+  err = keyvalue_putf (dict, "_amount", "%d", j_obj->valueint);
   if (err)
     goto leave;
+
+  j_tmp = cJSON_GetObjectItem (json, "card");
+  j_obj = j_tmp? cJSON_GetObjectItem (j_tmp, "last4") : NULL;
+  err = keyvalue_put (dict, "Last4", ((j_obj && cjson_is_string (j_obj))?
+                                        j_obj->valuestring : NULL));
+  if (err)
+    goto leave;
+
 
  leave:
   keyvalue_release (query);

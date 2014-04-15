@@ -194,6 +194,17 @@ trim_spaces (char *str)
 
 
 keyvalue_t
+keyvalue_find (keyvalue_t list, const char *key)
+{
+  keyvalue_t kv;
+
+  for (kv = list; kv; kv = kv->next)
+    if (!strcmp (kv->name, key))
+      return kv;
+  return NULL;
+}
+
+static keyvalue_t
 keyvalue_create (const char *key, const char *value)
 {
   keyvalue_t kv;
@@ -216,16 +227,13 @@ keyvalue_create (const char *key, const char *value)
 
 /* Append the string VALUE to the current value of KV.  */
 gpg_error_t
-keyvalue_append_to_last (keyvalue_t kv, const char *value)
+keyvalue_append_with_nl (keyvalue_t kv, const char *value)
 {
-  size_t n;
   char *p;
 
-  n = strlen (kv->value) + strlen (value);
-  p = xtrymalloc (n+1);
+  p = strconcat (kv->value, "\n", value, NULL);
   if (!p)
     return gpg_err_code_from_syserror ();
-  strcpy (stpcpy (p, kv->value), value);
   xfree (kv->value);
   kv->value = p;
   return 0;
@@ -236,25 +244,52 @@ gpg_error_t
 keyvalue_put (keyvalue_t *list, const char *key, const char *value)
 {
   keyvalue_t kv;
+  char *buf;
 
-  if (!key || !*key || !value)
+  if (!key || !*key)
     return gpg_error (GPG_ERR_INV_VALUE);
 
-  kv = keyvalue_create (key, value);
-  if (!kv)
-    return gpg_error_from_syserror ();
-  kv->next = *list;
-  *list = kv;
+  kv = keyvalue_find (*list, key);
+  if (kv) /* Update.  */
+    {
+      if (value)
+        {
+          buf = xtrystrdup (value);
+          if (!buf)
+            return gpg_error_from_syserror ();
+        }
+      else
+        buf = NULL;
+      xfree (kv->value);
+      kv->value = buf;
+    }
+  else if (value) /* Insert.  */
+    {
+      kv = keyvalue_create (key, value);
+      if (!kv)
+        return gpg_error_from_syserror ();
+      kv->next = *list;
+      *list = kv;
+    }
   return 0;
 }
 
 
 gpg_error_t
+keyvalue_del (keyvalue_t list, const char *key)
+{
+  /* LIST won't change due to the del operation.  */
+  return keyvalue_put (&list, key, NULL);
+}
+
+
+
+gpg_error_t
 keyvalue_putf (keyvalue_t *list, const char *key, const char *format, ...)
 {
+  gpg_error_t err;
   va_list arg_ptr;
   char *value;
-  keyvalue_t kv;
 
   if (!key || !*key)
     return gpg_error (GPG_ERR_INV_VALUE);
@@ -265,12 +300,10 @@ keyvalue_putf (keyvalue_t *list, const char *key, const char *format, ...)
   if (!value)
     return gpg_error_from_syserror ();
 
-  kv = keyvalue_create (key, value);
-  if (!kv)
-    return gpg_error_from_syserror ();
-  kv->next = *list;
-  *list = kv;
-  return 0;
+  err = keyvalue_put (list, key, value);
+  if (err)
+    es_free (value);
+  return err;
 }
 
 
@@ -303,4 +336,14 @@ keyvalue_get_string (keyvalue_t list, const char *key)
 {
   const char *s = keyvalue_get (list, key);
   return s? s: "";
+}
+
+
+int
+keyvalue_get_int (keyvalue_t list, const char *key)
+{
+  const char *s = keyvalue_get (list, key);
+  if (!s)
+    return 0;
+  return atoi (s);
 }

@@ -39,6 +39,7 @@ payprocd_SOURCES = \
 	stripe.c stripe.h \
 	tlssupport.c tlssupport.h \
 	cred.c cred.h \
+	journal.c journal.h \
 	$(utility_sources)
 
 noinst_PROGRAMS = $(module_tests) t-http
@@ -58,6 +59,6 @@ t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
 
-t_connection_SOURCES = t-connection.c stripe.c $(t_common_sources)
+t_connection_SOURCES = t-connection.c stripe.c journal.c $(t_common_sources)
 t_connection_CFLAGS  = $(t_common_cflags)
 t_connection_LDADD   = $(t_common_ldadd)

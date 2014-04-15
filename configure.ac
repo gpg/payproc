@@ -196,7 +196,7 @@ AC_DECL_SYS_SIGLIST
 # Checks for library functions.
 #
 AC_MSG_NOTICE([checking for library functions])
-AC_CHECK_FUNCS([strerror strlwr])
+AC_CHECK_FUNCS([strerror strlwr gmtime_r])
 
 # For http.c
 AC_CHECK_FUNCS([strtoull])

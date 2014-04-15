@@ -29,6 +29,7 @@
 #include "estream.h"
 #include "payprocd.h"
 #include "stripe.h"
+#include "journal.h"
 #include "connection.h"
 
 /* Maximum length of an input line.  */
@@ -177,7 +178,7 @@ store_data_line (conn_t conn, char *line)
       /* Continuation.  */
       if (!conn->dataitems)
         return gpg_error (GPG_ERR_PROTOCOL_VIOLATION);
-      return keyvalue_append_to_last (conn->dataitems, line);
+      return keyvalue_append_with_nl (conn->dataitems, line+1);
     }
 
   /* A name must start with a letter.  Note that for items used only
@@ -253,7 +254,6 @@ read_request (conn_t conn)
         buffer[--n] = 0;
     }
 
-  log_debug ("recvd cmd: '%s'\n", buffer);
   conn->command = xtrystrdup (buffer);
   if (!conn->command)
     {
@@ -297,7 +297,6 @@ read_request (conn_t conn)
             buffer[--n] = 0;
         }
 
-      log_debug ("recvd dat: '%s'\n", buffer);
       if (*buffer)
         {
           err = store_data_line (conn, buffer);
@@ -312,6 +311,32 @@ read_request (conn_t conn)
   es_free (buffer);
 
   return 0;
+}
+
+
+static void
+write_data_line (keyvalue_t kv, estream_t fp)
+{
+  const char *value;
+
+  if (!kv)
+    return;
+  value = kv->value;
+  if (!value)
+    return;
+  es_fputs (kv->name, fp);
+  es_fputs (": ", fp);
+  for ( ; *value; value++)
+    {
+      if (*value == '\n')
+        {
+          if (value[1])
+            es_fputs ("\n ", fp);
+        }
+      else
+        es_putc (*value, fp);
+    }
+  es_putc ('\n', fp);
 }
 
 
@@ -386,6 +411,26 @@ convert_amount (const char *string, int decdigits)
 }
 
 
+/* Retrun a string with the amount computed from CENTS.  DECDIGITS
+   gives the number of post decimal positions in CENTS.  Return NULL
+   on error.  */
+static char *
+reconvert_amount (int cents, int decdigits)
+{
+  unsigned int tens;
+  int i;
+
+  if (decdigits <= 0)
+    return es_asprintf ("%d", cents);
+  else
+    {
+      for (tens=1, i=0; i < decdigits; i++)
+        tens *= 10;
+      return es_asprintf ("%d.%0*d", cents / tens, decdigits, cents % tens);
+    }
+}
+
+
 
 
 /* The CARDTOKEN command creates a token for a card.  The following
@@ -409,7 +454,6 @@ cmd_cardtoken (conn_t conn, char *args)
 {
   gpg_error_t err;
   keyvalue_t dict = conn->dataitems;
-  keyvalue_t result = NULL;
   keyvalue_t kv;
   const char *s;
   int aint;
@@ -444,18 +488,23 @@ cmd_cardtoken (conn_t conn, char *args)
       goto leave;
     }
 
-
-  err = stripe_create_card_token (conn->dataitems, &result);
+  err = stripe_create_card_token (&conn->dataitems);
 
  leave:
   if (err)
-    es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                conn->errdesc? conn->errdesc : gpg_strerror (err));
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
   else
     es_fprintf (conn->stream, "OK\n");
-  for (kv = result; kv; kv = kv->next)
-    es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
-  keyvalue_release (result);
+  for (kv = conn->dataitems; kv; kv = kv->next)
+    if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+      write_data_line (kv, conn->stream);
 
   return err;
 }
@@ -476,7 +525,7 @@ cmd_cardtoken (conn_t conn, char *args)
    Stmt-Desc:  Optional string to be displayed on the credit
                card statement.  Will be truncated at about 15 characters.
    Email:      Optional contact mail address of the customer
-   Meta[NAME]: Meta data further described by NAME.  This is used convey
+   Meta[NAME]: Meta data further described by NAME.  This is used ro convey
                application specific data to the log file.
 
    On success these items are returned:
@@ -492,11 +541,11 @@ cmd_chargecard (conn_t conn, char *args)
 {
   gpg_error_t err;
   keyvalue_t dict = conn->dataitems;
-  keyvalue_t result = NULL;
   keyvalue_t kv;
   const char *s;
   unsigned int cents;
   int decdigs;
+  char *buf = NULL;
 
   (void)args;
 
@@ -530,29 +579,47 @@ cmd_chargecard (conn_t conn, char *args)
     }
 
   /* Let's ask Stripe to process it.  */
-  err = stripe_charge_card (conn->dataitems, &result);
+  err = stripe_charge_card (&conn->dataitems);
+  if (err)
+    goto leave;
+
+  buf = reconvert_amount (keyvalue_get_int (conn->dataitems, "_amount"),
+                          decdigs);
+  if (!buf)
+    {
+      err = gpg_error_from_syserror ();
+      conn->errdesc = "error converting _amount";
+      goto leave;
+    }
+  err = keyvalue_put (&conn->dataitems, "Amount", buf);
+  if (err)
+    goto leave;
+  jrnl_store_charge_record (conn->dataitems);
 
  leave:
   if (err)
-    es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                conn->errdesc? conn->errdesc : gpg_strerror (err));
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
   else
     es_fprintf (conn->stream, "OK\n");
-  for (kv = result; kv; kv = kv->next)
-    es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
-  keyvalue_release (result);
-
+  for (kv = conn->dataitems; kv; kv = kv->next)
+    if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+      write_data_line (kv, conn->stream);
+  es_free (buf);
   return err;
 }
 
 
 
 /* GETINFO is a multipurpose command to return certain config data. It
-   requires a subcommand:
-
-     list-currencies
-
-
+   requires a subcommand.  See the online help for a list of
+   subcommands.
  */
 static gpg_error_t
 cmd_getinfo (conn_t conn, char *args)
@@ -566,11 +633,21 @@ cmd_getinfo (conn_t conn, char *args)
         es_fprintf (conn->stream, "# %s - %s\n",
                     currency_table[i].name, currency_table[i].desc);
     }
+  else if (has_leading_keyword (args, "version"))
+    {
+      es_fputs ("OK " PACKAGE_VERSION "\n", conn->stream);
+    }
+  else if (has_leading_keyword (args, "pid"))
+    {
+      es_fprintf (conn->stream, "OK %u\n", (unsigned int)getpid());
+    }
   else
     {
       es_fputs ("ERR 1 (Unknown sub-command)\n"
                 "# Supported sub-commands are:\n"
-                "#   list-currencies  - List supported currencies\n"
+                "#   list-currencies    List supported currencies\n"
+                "#   version            Show the version of this daemon\n"
+                "#   pid                Show the pid of this process\n"
                 , conn->stream);
     }
 

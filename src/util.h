@@ -114,15 +114,17 @@ struct keyvalue_s
 
 typedef struct keyvalue_s *keyvalue_t;
 
-keyvalue_t keyvalue_create (const char *key, const char *value);
-gpg_error_t keyvalue_append_to_last (keyvalue_t kv, const char *value);
+gpg_error_t keyvalue_append_with_nl (keyvalue_t kv, const char *value);
 gpg_error_t keyvalue_put (keyvalue_t *list,
                                const char *key, const char *value);
+gpg_error_t keyvalue_del (keyvalue_t list, const char *key);
 gpg_error_t keyvalue_putf (keyvalue_t *list, const char *key,
                            const char *format, ...) JNLIB_GCC_A_PRINTF (3,4);
 void keyvalue_release (keyvalue_t kv);
+keyvalue_t keyvalue_find (keyvalue_t list, const char *key);
 const char *keyvalue_get (keyvalue_t list, const char *key);
 const char *keyvalue_get_string (keyvalue_t list, const char *key);
+int         keyvalue_get_int (keyvalue_t list, const char *key);
 
 
 
