@@ -17,4 +17,4 @@
 # along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 
-EXTRA_DIST = HACKING
+EXTRA_DIST = HACKING api-ref.org

@@ -1,0 +1,105 @@
+#+TITLE: API reference for payprocd.
+#+STARTUP: showall indent
+
+* General syntax
+
+  TBD
+
+* Commands
+
+A quick way to test commands is the use of the socat(1) tool:
+
+: socat - unix-client:/var/run/payproc/daemon
+
+
+** CARDTOKEN
+
+Request a token for a card
+
+Example:
+
+#+begin_example
+CARDTOKEN
+Number: 4242424242424242
+Exp-month: 8
+exp-year: 2014
+Cvc: 666
+Name: Juscelino Kubitschek
+
+OK
+Token: tok_103rEw23ctCHxH4kTpC9BDTm
+Last4: 4242
+Live: f
+
+#+end_example
+
+Note that a request starts off with a command (here CARDTOKEN) and is
+terminated by an empty line.  The response is either the "OK" or "ERR"
+optionally followed by words on the line.  The response may then
+consists of header lines and is terminated by a blank line.  Lines can
+be continued on the next line by prefixing a continuation line with a
+space.
+
+The use of CARDTOKEN is not suggested - better use Stripe's
+checkout Javascript to avoid handling sensitive card data on your
+machine.  Having access to an unused card token, it is possible to
+charge the card:
+
+** CHARGECARD
+
+#+begin_example
+CHARGECARD
+Card-Token: tok_103rEw23ctCHxH4kTpC9BDTm
+Currency: USD
+Amount: 17.50
+Desc: OpenPGP card for use with GnuPG
+Stmt-Desc: Openpgp card
+Meta[name]: Juscelino Kubitschek
+Meta[ship-to]: Palácio da Alvorada
+ 70000 Brasilia
+ Brazil
+
+OK
+_amount: 1750
+Currency: usd
+Live: f
+Charge-Id: ch_103rEw23ctCHxH4ktmJ5na8N
+
+#+end_example
+
+An arbitrary number of Meta header lines may be used in the request,
+they will all be written to the journal as key-value pairs.  An
+example for an error return is:
+
+#+begin_example
+ERR 1 (General error)
+failure: incorrect_number
+failure-mesg: Your card number is incorrect.
+Name: Juscelino Kubitschek
+
+#+end_example
+
+The "failure" data line contains a short description of the error.  It
+may be returned to the user.  If a "failure-mesg" line is returned,
+that may be returned verbatim to the user.  There is no guarantee that
+a "failure" line will be preset.  However, the number after ERR is a
+gpg-error error code and may be show to the user.  The description
+after the number is usually the gpg_strerror of the error code but may
+also be a more specific human readable string.
+
+** CHECKAMOUNT
+
+To convert an requested amount to the format used by Stripe, this
+command can be used:
+
+#+begin_example
+CHECKAMOUNT
+Amount: 17.3
+Currency: Eur
+
+OK
+_amount: 1730
+Currency: Eur
+Amount: 17.3
+
+#+end_example
