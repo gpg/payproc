@@ -50,6 +50,8 @@ NEED_LIBASSUAN_VERSION=2.1.0
 NEED_NPTH_API=1
 NEED_NPTH_VERSION=0.91
 
+NEED_GNUTLS_VERSION=3.0
+
 development_version=mym4_isgit
 
 AC_CONFIG_AUX_DIR(build-aux)
@@ -144,7 +146,9 @@ AC_DEFINE(USE_NPTH, 1, [Defined to use New Portable Thread Library])
 #
 # GNUTLS
 #
-PKG_CHECK_MODULES([LIBGNUTLS], [gnutls >= 1.12])
+PKG_CHECK_MODULES([LIBGNUTLS], [gnutls >= $NEED_GNUTLS_VERSION],
+                               [have_gnutls=yes],
+                               [have_gnutls=no])
 AC_SUBST([LIBGNUTLS_CFLAGS])
 AC_SUBST([LIBGNUTLS_LIBS])
 AC_DEFINE(HTTP_USE_GNUTLS, 1, [Enable GNUTLS support in http.c])
