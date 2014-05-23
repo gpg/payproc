@@ -348,6 +348,32 @@ keyvalue_get_int (keyvalue_t list, const char *key)
   return atoi (s);
 }
 
+
+/* Mapping table for zb32.  */
+static char const zb32asc[32] = {'y','b','n','d','r','f','g','8',
+                                 'e','j','k','m','c','p','q','x',
+                                 'o','t','1','u','w','i','s','z',
+                                 'a','3','4','5','h','7','6','9' };
+
+/* If C is a valid ZB32 character return its index (0..31).  If it is
+   not valid return -1.  */
+int
+zb32_index (int c)
+{
+  const char *p;
+
+  p = memchr (zb32asc, c, 32);
+  if (p)
+    return p - zb32asc;
+  if (c >= 'A' && c <= 'Z')
+    {
+      p = memchr (zb32asc, c - 'A' + 'a', 32);
+      if (p)
+        return p - zb32asc;
+    }
+  return -1;
+}
+
 
 /* Zooko's base32 variant. See RFC-6189 and
    http://philzimmermann.com/docs/human-oriented-base-32-encoding.txt
@@ -357,10 +383,6 @@ keyvalue_get_int (keyvalue_t list, const char *key)
 char *
 zb32_encode (const void *data, unsigned int databits)
 {
-  static char const zb32asc[32] = {'y','b','n','d','r','f','g','8',
-                                   'e','j','k','m','c','p','q','x',
-                                   'o','t','1','u','w','i','s','z',
-                                   'a','3','4','5','h','7','6','9' };
   const unsigned char *s;
   char *output, *d;
   size_t datalen;

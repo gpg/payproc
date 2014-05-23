@@ -126,6 +126,7 @@ const char *keyvalue_get (keyvalue_t list, const char *key);
 const char *keyvalue_get_string (keyvalue_t list, const char *key);
 int         keyvalue_get_int (keyvalue_t list, const char *key);
 
+int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);
 
 
