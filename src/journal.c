@@ -76,6 +76,9 @@
 #include "http.h"
 #include "journal.h"
 
+/* The size of our standard timestamp.  */
+#define TIMESTAMP_SIZE 15
+
 
 /* Infor about an open log file.  */
 struct logfile_s
@@ -186,9 +189,10 @@ write_and_close_fp (estream_t fp)
 }
 
 
-
+/* Get the current time and put it into TIMESTAMP, which must be a
+   buffer of at least TIMESTAMP_SIZE + 1 bytes.  */
 static void
-put_current_time (estream_t fp)
+get_current_time (char *timestamp)
 {
   time_t atime = time (NULL);
   struct tm *tp;
@@ -210,9 +214,9 @@ put_current_time (estream_t fp)
   tp = gmtime (&atime);
 #endif
 
-  es_fprintf (fp, "%04d%02d%02dT%02d%02d%02d",
-              1900 + tp->tm_year, tp->tm_mon+1, tp->tm_mday,
-              tp->tm_hour, tp->tm_min, tp->tm_sec);
+  snprintf (timestamp, TIMESTAMP_SIZE+1, "%04d%02d%02dT%02d%02d%02d",
+            1900 + tp->tm_year, tp->tm_mon+1, tp->tm_mday,
+            tp->tm_hour, tp->tm_min, tp->tm_sec);
 }
 
 
@@ -225,9 +229,13 @@ jrnl_set_file (const char *fname)
 
 
 static estream_t
-start_record (char type)
+start_record (char type, char *timestamp)
 {
   estream_t fp;
+  char timestamp_buffer[TIMESTAMP_SIZE + 1];
+
+  if (!timestamp)
+    timestamp = timestamp_buffer;
 
   fp = es_fopenmem (0, "w+,samethread");
   if (!fp)
@@ -237,8 +245,8 @@ start_record (char type)
       severe_error ();
     }
 
-  put_current_time (fp);
-  es_fprintf (fp, ":%c:", type);
+  get_current_time (timestamp);
+  es_fprintf (fp, "%s:%c:", timestamp, type);
   return fp;
 }
 
@@ -308,7 +316,7 @@ jrnl_store_sys_record (const char *text)
 {
   estream_t fp;
 
-  fp = start_record ('$');
+  fp = start_record ('$', NULL);
   es_fputs (":::", fp);
   write_escaped (text, fp);
   es_fputs ("::::::", fp);
@@ -320,13 +328,17 @@ jrnl_store_sys_record (const char *text)
    sure to write that to the journal.  If we can't do that, we better
    stop the process to limit the number of records lost.  I consider
    it better to have a non-working web form than to have too many non
-   recorded transaction. */
+   recorded transaction.  Adds "_timestamp" record into DICT.  */
 void
-jrnl_store_charge_record (keyvalue_t dict)
+jrnl_store_charge_record (keyvalue_t *dictp)
 {
   estream_t fp;
+  char timestamp[TIMESTAMP_SIZE + 1];
+  keyvalue_t dict;
 
-  fp = start_record ('C');
+  fp = start_record ('C', timestamp);
+  keyvalue_put (dictp, "_timestamp", timestamp);
+  dict = *dictp;
   es_fprintf (fp, "%d:", (*keyvalue_get_string (dict, "Live") == 't'));
   write_escaped (keyvalue_get_string (dict, "Currency"), fp);
   write_escaped (keyvalue_get_string (dict, "Amount"), fp);

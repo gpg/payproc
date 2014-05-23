@@ -596,7 +596,7 @@ cmd_chargecard (conn_t conn, char *args)
   err = keyvalue_put (&conn->dataitems, "Amount", buf);
   if (err)
     goto leave;
-  jrnl_store_charge_record (conn->dataitems);
+  jrnl_store_charge_record (&conn->dataitems);
 
  leave:
   if (err)
@@ -613,6 +613,9 @@ cmd_chargecard (conn_t conn, char *args)
   for (kv = conn->dataitems; kv; kv = kv->next)
     if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
       write_data_line (kv, conn->stream);
+  if (!err)
+    write_data_line (keyvalue_find (conn->dataitems, "_timestamp"),
+                     conn->stream);
   es_free (buf);
   return err;
 }

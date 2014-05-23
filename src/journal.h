@@ -22,7 +22,7 @@
 
 void jrnl_set_file (const char *fname);
 void jrnl_store_sys_record (const char *text);
-void jrnl_store_charge_record (keyvalue_t dict);
+void jrnl_store_charge_record (keyvalue_t *dictp);
 
 
 #endif /*JOURNAL_H*/
