@@ -1,5 +1,11 @@
       Payproc - The Payment Processor
 
+Noteworthy changes in version 0.2.0 (2014-05-23)
+------------------------------------------------
+
+ * Add session mangement.
+
+
 Noteworthy changes in version 0.1.0 (2014-04-17)
 ------------------------------------------------
 

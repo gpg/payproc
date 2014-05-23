@@ -104,3 +104,43 @@ Currency: Eur
 Amount: 17.3
 
 #+end_example
+
+
+** SESSION
+
+This is a multipurpose command to help implement a state-full service.
+Note that the state information is intentional not persistent and thus
+won't survive a daemon restart.
+
+The following sub-commands are available:
+
+- Create a new session
+
+  : create [TTL]
+
+  A new session is created and the provided data dictionary is stored
+  by payprocd for future requests.  The data dictionary is optional.
+  On success the returned data has an "_SESSID" item which is to be
+  used for all further requests.  If TTL has been given this is used
+  instead of the defaul TTL value.
+
+ - Destroy a session.
+
+   : destroy SESSID
+
+   This shall be used to free the internal storage required for the
+   session and to avoid leaving sensitive information in RAM.
+
+ - Get data from a session.
+
+   : get SESSID
+
+   Return the data stored in the session identified by SESSID.
+
+ - Put data into a session.
+
+   : put SESSID
+
+   Store or update the given data in the session.  Deleting an item
+   from the session dictionary is possible by putting an empty string
+   for it.

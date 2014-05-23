@@ -30,6 +30,7 @@
 #include "payprocd.h"
 #include "stripe.h"
 #include "journal.h"
+#include "session.h"
 #include "connection.h"
 
 /* Maximum length of an input line.  */
@@ -433,6 +434,126 @@ reconvert_amount (int cents, int decdigits)
 }
 
 
+
+/* SESSION is a multipurpose command to help implement a state-full
+   service.  Note that the state information is intentional not
+   persistent and thus won't survive a daemon restart.
+
+   The following sub-commands are available:
+
+   create [TTL]
+
+     Create a new session
+
+     A new session is created and the provided data dictionary is
+     stored by payprocd for future requests.  The data dictionary is
+     optional.  On success the returned data has an "_SESSID" item
+     which is to be used for all further requests.  If TTL has been
+     given this is used instead of the defaul TTL value.
+
+   destroy SESSID
+
+     Destroy a session.
+
+     This shall be used to free the internal storage required for the
+     session and to avoid leaving sensitive information in RAM.
+
+   get SESSID
+
+     Get data from a session.
+
+     Return the data stored in the session identified by SESSID.
+
+   put SESSID
+
+     Put data into a session.
+
+     Store or update the given data in the session.  Deleting an item
+     from the session dictionary is possible by putting an empty
+     string for it.
+ */
+static gpg_error_t
+cmd_session (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  keyvalue_t kv;
+  char *options;
+  char *sessid = NULL;
+  char *errdesc;
+
+  if ((options = has_leading_keyword (args, "create")))
+    {
+      int ttl = atoi (options);
+      err = session_create (ttl, conn->dataitems, &sessid);
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+    }
+  else if ((options = has_leading_keyword (args, "get")))
+    {
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+      err = session_get (options, &conn->dataitems);
+    }
+  else if ((options = has_leading_keyword (args, "put")))
+    {
+      err = session_put (options, conn->dataitems);
+      if (gpg_err_code (err) == GPG_ERR_ENOMEM)
+        {
+          /* We are tight on memory - better destroy the session so
+             that the caller can't try over and over again.  */
+          session_destroy (options);
+        }
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+    }
+  else if ((options = has_leading_keyword (args, "destroy")))
+    {
+      err = session_destroy (options);
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+    }
+  else
+    {
+      es_fputs ("ERR 1 (Unknown sub-command)\n"
+                "# Supported sub-commands are:\n"
+                "#   create [TTL]\n"
+                "#   get SESSID\n"
+                "#   put SESSID\n"
+                "#   destroy SESSID\n"
+                , conn->stream);
+      return 0;
+    }
+
+  switch (gpg_err_code (err))
+    {
+    case GPG_ERR_LIMIT_REACHED:
+      errdesc = "Too many active sessions";
+      break;
+    case GPG_ERR_NOT_FOUND:
+      errdesc = "No such session or session timed out";
+      break;
+    case GPG_ERR_INV_NAME:
+      errdesc = "Invalid session id";
+      break;
+    default: errdesc = NULL;
+    }
+
+  if (err)
+    es_fprintf (conn->stream, "ERR %d (%s)\n",
+                err, errdesc? errdesc : gpg_strerror (err));
+  else
+    {
+      es_fprintf (conn->stream, "OK\n");
+      if (sessid)
+        es_fprintf (conn->stream, "_SESSID: %s\n", sessid);
+      for (kv = conn->dataitems; kv; kv = kv->next)
+        if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+          write_data_line (kv, conn->stream);
+    }
+  xfree (sessid);
+  return err;
+}
+
 
 
 /* The CARDTOKEN command creates a token for a card.  The following
@@ -448,8 +569,7 @@ reconvert_amount (int cents, int decdigits)
 
    Token:     The one time use token
    Last4:     The last 4 digits of the card for display
-   Live:      f in test mode, t in live mode.
-
+   Live:      Set to 'f' in test mode or 't' in live mode.
  */
 static gpg_error_t
 cmd_cardtoken (conn_t conn, char *args)
@@ -527,15 +647,16 @@ cmd_cardtoken (conn_t conn, char *args)
    Stmt-Desc:  Optional string to be displayed on the credit
                card statement.  Will be truncated at about 15 characters.
    Email:      Optional contact mail address of the customer
-   Meta[NAME]: Meta data further described by NAME.  This is used ro convey
+   Meta[NAME]: Meta data further described by NAME.  This is used to convey
                application specific data to the log file.
 
    On success these items are returned:
 
    Charge-Id:  The ID describing this charge
-   Live:       f in test mode, t in live mode.
+   Live:       Set to 'f' in test mode or 't' in live mode.
    Currency:   The currency of the charge.
    Amount:     The charged amount with optional decimal fraction.
+   _timestamp: The timestamp as written to the journal
 
  */
 static gpg_error_t
@@ -769,7 +890,9 @@ connection_handler (conn_t conn)
     }
   es_fflush (conn->stream);
 
-  if ((cmdargs = has_leading_keyword (conn->command, "CARDTOKEN")))
+  if ((cmdargs = has_leading_keyword (conn->command, "SESSION")))
+    err = cmd_session (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "CARDTOKEN")))
     err = cmd_cardtoken (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "CHARGECARD")))
     err = cmd_chargecard (conn, cmdargs);

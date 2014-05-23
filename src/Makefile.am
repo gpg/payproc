@@ -40,6 +40,7 @@ payprocd_SOURCES = \
 	tlssupport.c tlssupport.h \
 	cred.c cred.h \
 	journal.c journal.h \
+	session.c session.h \
 	$(utility_sources)
 
 noinst_PROGRAMS = $(module_tests) t-http
@@ -47,8 +48,10 @@ TESTS = $(module_tests)
 
 module_tests = t-connection
 
-AM_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGNUTLS_CFLAGS)
-LDADD  = -lm $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGNUTLS_LIBS)
+AM_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGCRYPT_CFLAGS) \
+            $(LIBGNUTLS_CFLAGS)
+LDADD  = -lm $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGCRYPT_LIBS) \
+	 $(LIBGNUTLS_LIBS)
 
 t_common_sources = t-common.h $(utility_sources)
 t_common_cflags  = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGNUTLS_CFLAGS)
@@ -59,6 +62,7 @@ t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
 
-t_connection_SOURCES = t-connection.c stripe.c journal.c $(t_common_sources)
-t_connection_CFLAGS  = $(t_common_cflags)
-t_connection_LDADD   = $(t_common_ldadd)
+t_connection_SOURCES = t-connection.c stripe.c journal.c session.c \
+                      $(t_common_sources)
+t_connection_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS)
+t_connection_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS)

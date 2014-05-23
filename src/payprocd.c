@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <gpg-error.h>
 #include <npth.h>
+#include <gcrypt.h>
 
 #include "util.h"
 #include "logging.h"
@@ -39,14 +40,18 @@
 #include "tlssupport.h"
 #include "cred.h"
 #include "journal.h"
+#include "session.h"
 #include "payprocd.h"
 
 
 /* The name of the socket handling commands.  */
 #define SOCKET_NAME "/var/run/payproc/daemon"
 
-/* The interval in seconds for the housekeeping thread.  */
-#define TIMERTICK_INTERVAL  60
+/* The interval in seconds to check whether to do housekeeping.  */
+#define TIMERTICK_INTERVAL  30
+
+/* The interval in seconds to run the housekeeping thread.  */
+#define HOUSEKEEPING_INTERVAL  (120)
 
 /* Flag indicating that the socket shall shall be removed by
    cleanup.  */
@@ -100,6 +105,7 @@ static ARGPARSE_OPTS opts[] = {
 static void cleanup (void);
 static void launch_server (const char *logfile);
 static void server_loop (int fd);
+static void handle_tick (void);
 static void handle_signal (int signo);
 static void *connection_thread (void *arg);
 
@@ -186,6 +192,14 @@ main (int argc, char **argv)
       log_error ("atexit failed\n");
       cleanup ();
       exit (1);
+    }
+
+  /* Check that Libgcrypt is suitable.  */
+  gcry_control (GCRYCTL_DISABLE_SECMEM, 0);
+  if (!gcry_check_version (NEED_LIBGCRYPT_VERSION) )
+    {
+      log_fatal ("%s is too old (need %s, have %s)\n", "libgcrypt",
+                 NEED_LIBGCRYPT_VERSION, gcry_check_version (NULL) );
     }
 
   /* Initialze processing subsystems.  */
@@ -509,7 +523,7 @@ server_loop (int listen_fd)
   nfd = listen_fd;
 
   npth_clock_gettime (&abstime);
-  /* abstime.tv_sec += TIMERTICK_INTERVAL; */
+  abstime.tv_sec += TIMERTICK_INTERVAL;
 
   for (;;)
     {
@@ -530,7 +544,7 @@ server_loop (int listen_fd)
       if (!(npth_timercmp (&curtime, &abstime, <)))
         {
           /* Timeout.  */
-          /* handle_tick (); */
+          handle_tick ();
           npth_clock_gettime (&abstime);
           abstime.tv_sec += TIMERTICK_INTERVAL;
         }
@@ -603,6 +617,84 @@ server_loop (int listen_fd)
   npth_attr_destroy (&tattr);
 }
 
+
+#if JNLIB_GCC_HAVE_PUSH_PRAGMA
+# pragma GCC push_options
+# pragma GCC optimize ("no-strict-overflow")
+#endif
+static int
+time_for_housekeeping_p (time_t now)
+{
+  static time_t last_housekeeping;
+
+  if (!last_housekeeping)
+    last_housekeeping = now;
+
+  if (last_housekeeping + HOUSEKEEPING_INTERVAL <= now
+      || last_housekeeping > now /*(be prepared for y2038)*/)
+    {
+      last_housekeeping = now;
+      return 1;
+    }
+  return 0;
+}
+#if JNLIB_GCC_HAVE_PUSH_PRAGMA
+# pragma GCC pop_options
+#endif
+
+
+/* Thread to do the housekeeping.  */
+static void *
+housekeeping_thread (void *arg)
+{
+  static int sentinel;
+
+  (void)arg;
+
+  if (sentinel)
+    {
+      log_info ("only one cleaning person at a time please\n");
+      return NULL;
+    }
+  sentinel++;
+  if (opt.verbose)
+    log_info ("starting housekeeping\n");
+
+  session_housekeeping ();
+
+  if (opt.verbose)
+    log_info ("finished with housekeeping\n");
+  sentinel--;
+  return NULL;
+
+}
+
+
+/* This is the worker for the ticker.  It is called every few seconds
+   and may only do fast operations. */
+static void
+handle_tick (void)
+{
+  if (time_for_housekeeping_p (time (NULL)))
+    {
+      npth_t thread;
+      npth_attr_t tattr;
+      int rc;
+
+      rc = npth_attr_init (&tattr);
+      if (rc)
+        log_error ("error preparing housekeeping thread: %s\n", strerror (rc));
+      else
+        {
+          npth_attr_setdetachstate (&tattr, NPTH_CREATE_DETACHED);
+          rc = npth_create (&thread, &tattr, housekeeping_thread, NULL);
+          if (rc)
+            log_error ("error spawning housekeeping thread: %s\n",
+                       strerror (rc));
+          npth_attr_destroy (&tattr);
+        }
+    }
+}
 
 
 /* The signal handler for payprocd.  It is expected to be run in its

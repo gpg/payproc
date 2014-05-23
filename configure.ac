@@ -50,6 +50,9 @@ NEED_LIBASSUAN_VERSION=2.1.0
 NEED_NPTH_API=1
 NEED_NPTH_VERSION=0.91
 
+NEED_LIBGCRYPT_API=1
+NEED_LIBGCRYPT_VERSION=1.6.0
+
 NEED_GNUTLS_VERSION=3.0
 
 development_version=mym4_isgit
@@ -64,6 +67,8 @@ AC_GNU_SOURCE
 
 AC_DEFINE_UNQUOTED(PACKAGE_BUGREPORT, "$PACKAGE_BUGREPORT",
                                         [Bug report address])
+AC_DEFINE_UNQUOTED(NEED_LIBGCRYPT_VERSION, "$NEED_LIBGCRYPT_VERSION",
+                                       [Required version of Libgcrypt])
 
 
 #
@@ -142,6 +147,15 @@ else
 ***]])
 fi
 AC_DEFINE(USE_NPTH, 1, [Defined to use New Portable Thread Library])
+
+
+#
+# We need Libgcrypt for its RNG and the hash fucntion.  Maybe for more
+# things in the future.
+#
+AM_PATH_LIBGCRYPT("$NEED_LIBGCRYPT_API:$NEED_LIBGCRYPT_VERSION",
+        have_libgcrypt=yes,have_libgcrypt=no)
+
 
 #
 # GNUTLS
@@ -344,6 +358,16 @@ if test "$have_npth" = "no"; then
 *** library first.  The library is for example available at
 ***   ftp://ftp.gnupg.org/gcrypt/npth/
 *** (at least version $NEED_NPTH_VERSION (API $NEED_NPTH_API) is required).
+***]])
+fi
+if test "$have_libgcrypt" = "no"; then
+   die=yes
+   AC_MSG_NOTICE([[
+***
+*** You need libgcrypt to build this program.
+**  This library is for example available at
+***   ftp://ftp.gnupg.org/gcrypt/libgcrypt/
+*** (at least version $NEED_LIBGCRYPT_VERSION (API $NEED_LIBGCRYPT_API) is required.)
 ***]])
 fi
 
