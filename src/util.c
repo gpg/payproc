@@ -210,7 +210,7 @@ keyvalue_create (const char *key, const char *value)
   keyvalue_t kv;
 
   /* Insert a new data item. */
-  kv = xtrymalloc (sizeof *kv + strlen (value));
+  kv = xtrymalloc (sizeof *kv + strlen (key));
   if (!kv)
     return NULL;
   kv->next = NULL;
