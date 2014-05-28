@@ -372,6 +372,7 @@ init_stream_lock (estream_t ES__RESTRICT stream)
   return rc;
 #else
   (void)stream;
+  return 0;
 #endif
 }
 
@@ -409,6 +410,7 @@ trylock_stream (estream_t ES__RESTRICT stream)
   return rc;
 #else
   (void)stream;
+  return 0;
 #endif
 }
 
@@ -429,18 +431,18 @@ unlock_stream (estream_t ES__RESTRICT stream)
 }
 
 
+#ifdef HAVE_NPTH
 static int
 init_list_lock (void)
 {
-#ifdef HAVE_NPTH
   int rc;
 
   dbg_lock_0 ("enter init_list_lock\n");
   rc = npth_mutex_init (&estream_list_lock, NULL);
   dbg_lock_1 ("leave init_list_lock: rc=%d\n", rc);
   return rc;
-#endif
 }
+#endif
 
 
 static void

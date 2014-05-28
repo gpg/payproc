@@ -83,6 +83,15 @@
    \v, but works for the purposes used here. */
 #define ascii_isspace(a) ((a)==' ' || (a)=='\n' || (a)=='\r' || (a)=='\t')
 
+/* The atoi macros assume that the buffer has only valid digits. */
+#define atoi_1(p)   (*(p) - '0' )
+#define atoi_2(p)   ((atoi_1(p) * 10) + atoi_1((p)+1))
+#define atoi_4(p)   ((atoi_2(p) * 100) + atoi_2((p)+2))
+#define xtoi_1(p)   (*(p) <= '9'? (*(p)- '0'): \
+                     *(p) <= 'F'? (*(p)-'A'+10):(*(p)-'a'+10))
+#define xtoi_2(p)   ((xtoi_1(p) * 16) + xtoi_1((p)+1))
+#define xtoi_4(p)   ((xtoi_2(p) * 256) + xtoi_2((p)+2))
+
 
 /* The default error source of the application.  This is different
    from GPG_ERR_SOURCE_DEFAULT in that it does not depend on the
@@ -103,6 +112,9 @@ char *strconcat (const char *s1, ...) JNLIB_GCC_A_SENTINEL(0);
 
 
 char *has_leading_keyword (const char *string, const char *keyword);
+const char *memstr (const void *buffer, size_t buflen, const char *sub);
+const char *memistr (const void *buffer, size_t buflen, const char *sub);
+int memicmp (const char *a, const char *b, size_t n);
 char *trim_spaces (char *str);
 
 
@@ -131,6 +143,12 @@ int         keyvalue_get_int (keyvalue_t list, const char *key);
 int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);
 
+/*-- percent.c --*/
+char *percent_plus_escape (const char *string);
+char *percent_plus_unescape (const char *string, int nulrepl);
+char *percent_unescape (const char *string, int nulrepl);
+size_t percent_plus_unescape_inplace (char *string, int nulrepl);
+size_t percent_unescape_inplace (char *string, int nulrepl);
 
 
 #endif /*UTIL_H*/

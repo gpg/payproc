@@ -33,3 +33,6 @@
 /src/t-connection
 /src/out2
 /payproc-*.tar.bz2
+/src/payproc-jrnl
+/src/libcommon.a
+/src/libcommonpth.a

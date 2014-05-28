@@ -18,20 +18,31 @@
 
 EXTRA_DIST = cJSON.readme tls-ca.pem
 
+bin_PROGRAMS = payprocd payproc-jrnl
+noinst_PROGRAMS = $(module_tests) t-http
+noinst_LIBRARIES = libcommon.a libcommonpth.a
 
-bin_PROGRAMS = payprocd
+TESTS = $(module_tests)
 
-utility_sources = \
+common_sources = \
 	util.c util.h \
 	estream.c estream.h \
 	estream-printf.c estream-printf.h \
 	libjnlib-config.h \
 	logging.c logging.h \
-	http.c http.h \
-	cJSON.c cJSON.h \
 	membuf.c membuf.h \
 	strlist.c strlist.h \
+	percent.c \
 	argparse.c argparse.h
+
+libcommon_a_SOURCES = $(common_sources)
+libcommon_a_CFLAGS = $(AM_CFLAGS) $(LIBGPG_ERROR_CFLAGS) -DWITHOUT_NPTH=1
+libcommonpth_a_SOURCES = $(common_sources)
+libcommonpth_a_CFLAGS = $(AM_CFLAGS) $(LIBGPG_ERROR_CFLAGS)
+
+utility_sources = \
+	http.c http.h \
+	cJSON.c cJSON.h
 
 payprocd_SOURCES = \
 	payprocd.c payprocd.h \
@@ -42,22 +53,27 @@ payprocd_SOURCES = \
 	journal.c journal.h \
 	session.c session.h \
 	$(utility_sources)
+payprocd_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGCRYPT_CFLAGS) \
+                  $(LIBGNUTLS_CFLAGS)
+payprocd_LDADD = -lm libcommonpth.a \
+                  $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGCRYPT_LIBS) \
+                  $(LIBGNUTLS_LIBS)
 
-noinst_PROGRAMS = $(module_tests) t-http
-TESTS = $(module_tests)
+payproc_jrnl_SOURCES = \
+        payproc-jrnl.c
+
 
 module_tests = t-connection
 
-AM_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGCRYPT_CFLAGS) \
-            $(LIBGNUTLS_CFLAGS)
-LDADD  = -lm $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGCRYPT_LIBS) \
-	 $(LIBGNUTLS_LIBS)
+AM_CFLAGS = $(GPG_ERROR_CFLAGS)
+LDADD  = -lm libcommon.a $(GPG_ERROR_LIBS)
 
 t_common_sources = t-common.h $(utility_sources)
 t_common_cflags  = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGNUTLS_CFLAGS)
-t_common_ldadd   = $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGNUTLS_LIBS) -lm
+t_common_ldadd   = libcommonpth.a $(GPG_ERROR_LIBS) $(NPTH_LIBS) \
+                   $(LIBGNUTLS_LIBS) -lm
 
-# (http.c and http.h are part of common_sources)
+# (http.c and http.h are part of t_common_sources)
 t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)

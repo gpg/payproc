@@ -162,6 +162,71 @@ has_leading_keyword (const char *string, const char *keyword)
 }
 
 
+/* Find string SUB in (BUFFER,BUFLEN).  */
+const char *
+memstr (const void *buffer, size_t buflen, const char *sub)
+{
+  const char *buf = buffer;
+  const char *t = buf;
+  const char *s = sub;
+  size_t n = buflen;
+
+  for (; n; t++, n--)
+    {
+      if (*t == *s)
+        {
+          for (buf = t++, buflen = n--, s++; n && *t == *s; t++, s++, n--)
+            ;
+          if (!*s)
+            return buf;
+          t = buf;
+          s = sub ;
+          n = buflen;
+	}
+    }
+  return NULL;
+}
+
+
+/* Find string SUB in (BUFFER,BUFLEN).
+ * Comparison is case-insensitive.  */
+const char *
+memistr (const void *buffer, size_t buflen, const char *sub)
+{
+  const unsigned char *buf = buffer;
+  const unsigned char *t = (const unsigned char *)buffer;
+  const unsigned char *s = (const unsigned char *)sub;
+  size_t n = buflen;
+
+  for ( ; n ; t++, n-- )
+    {
+      if ( toupper (*t) == toupper (*s) )
+        {
+          for ( buf=t++, buflen = n--, s++;
+                n && toupper (*t) == toupper (*s); t++, s++, n-- )
+            ;
+          if (!*s)
+            return (const char*)buf;
+          t = buf;
+          s = (const unsigned char *)sub ;
+          n = buflen;
+	}
+    }
+  return NULL;
+}
+
+
+int
+memicmp (const char *a, const char *b, size_t n)
+{
+  for ( ; n; n--, a++, b++ )
+    if (*a != *b && (toupper (*(const unsigned char*)a)
+                     != toupper(*(const unsigned char*)b)))
+      return *(const unsigned char *)a - *(const unsigned char*)b;
+  return 0;
+}
+
+
 /*
  * Remove leading and trailing white space from STR.  Return STR.
  */

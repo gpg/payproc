@@ -32,22 +32,22 @@
 
    | No | Name     | Description                                    |
    |----+----------+------------------------------------------------|
-   |    | date     | UTC the record was created (yyyymmddThhmmss)   |
-   |    | type     | Record type                                    |
+   |  1 | date     | UTC the record was created (yyyymmddThhmmss)   |
+   |  2 | type     | Record type                                    |
    |    |          | - := sync mark record                          |
    |    |          | $ := system record                             |
    |    |          | C := credit card charge                        |
    |    |          | R := credit card refund                        |
-   |    | account  | Even numbers are test accounts.                |
-   |    | currency | 3 letter ISO code for the currency (lowercase) |
-   |    | amount   | Amount with decimal point                      |
-   |    | desc     | Description for this transaction               |
-   |    | email    | Email address                                  |
-   |    | meta     | Structured field with additional data          |
-   |    | last4    | The last 4 digits of the card                  |
-   |    | paygw    | Payment gateway (0=n/a, 1=stripe.com)          |
-   |    | chargeid | Charge id
-   |    | blntxid  | Balance transaction id                         |
+   |  3 | account  | Even numbers are test accounts.                |
+   |  4 | currency | 3 letter ISO code for the currency (lowercase) |
+   |  5 | amount   | Amount with decimal point                      |
+   |  6 | desc     | Description for this transaction               |
+   |  7 | mail     | Email address                                  |
+   |  8 | meta     | Structured field with additional data          |
+   |  9 | last4    | The last 4 digits of the card                  |
+   | 10 | service  | Payment service (0=n/a, 1=stripe.com)          |
+   | 11 | chargeid | Charge id                                      |
+   | 12 | blntxid  | Balance transaction id                         |
    |----+----------+------------------------------------------------|
 
    Because of the multithreaded operation it may happen that records
