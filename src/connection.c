@@ -29,6 +29,7 @@
 #include "estream.h"
 #include "payprocd.h"
 #include "stripe.h"
+#include "paypal.h"
 #include "journal.h"
 #include "session.h"
 #include "connection.h"
@@ -101,6 +102,25 @@ init_connection_obj (conn_t conn, int fd)
 }
 
 
+/* Shutdown a connection.  This is used by asynchronous calls to tell
+   the client that the request has been received and processing will
+   continue.  */
+void
+shutdown_connection_obj (conn_t conn)
+{
+  if (conn->stream)
+    {
+      es_fclose (conn->stream);
+      conn->stream = NULL;
+    }
+  if (conn->fd != -1)
+    {
+      close (conn->fd);
+      conn->fd = -1;
+    }
+}
+
+
 /* Release a connection object.  */
 void
 release_connection_obj (conn_t conn)
@@ -108,9 +128,7 @@ release_connection_obj (conn_t conn)
   if (!conn)
     return;
 
-  es_fclose (conn->stream);
-  if (conn->fd != -1)
-    close (conn->fd);
+  shutdown_connection_obj (conn);
 
   xfree (conn->command);
   keyvalue_release (conn->dataitems);
@@ -898,6 +916,14 @@ connection_handler (conn_t conn)
     err = cmd_chargecard (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "CHECKAMOUNT")))
     err = cmd_checkamount (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "PPIPNHD")))
+    {
+      /* This is an asynchronous call.  Thus send okay, close the
+         socket, and only then process the IPN.  */
+      es_fputs ("OK\n\n", conn->stream);
+      shutdown_connection_obj (conn);
+      paypal_proc_ipn (conn->idno, &conn->dataitems);
+    }
   else if ((cmdargs = has_leading_keyword (conn->command, "GETINFO")))
     err = cmd_getinfo (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "PING")))
@@ -909,6 +935,8 @@ connection_handler (conn_t conn)
       for (kv = conn->dataitems; kv; kv = kv->next)
         es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
     }
-  es_fprintf (conn->stream, "\n");
+
+  if (conn->stream)
+    es_fprintf (conn->stream, "\n");
 
 }
