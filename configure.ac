@@ -70,6 +70,11 @@ AC_DEFINE_UNQUOTED(PACKAGE_BUGREPORT, "$PACKAGE_BUGREPORT",
 AC_DEFINE_UNQUOTED(NEED_LIBGCRYPT_VERSION, "$NEED_LIBGCRYPT_VERSION",
                                        [Required version of Libgcrypt])
 
+AC_ARG_VAR([PAYPROCD_SOCKET_NAME], [Name of the socket to connect payprocd])dnl
+test -z "$PAYPROCD_SOCKET_NAME" && PAYPROCD_SOCKET_NAME=/var/run/payproc/daemon
+AC_DEFINE_UNQUOTED([PAYPROCD_SOCKET_NAME], "$PAYPROCD_SOCKET_NAME",
+                                    [Name of the socket to connect payprocd])
+
 
 #
 # To avoid double inclusion of config.h which might happen at some

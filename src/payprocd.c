@@ -44,9 +44,6 @@
 #include "payprocd.h"
 
 
-/* The name of the socket handling commands.  */
-#define SOCKET_NAME "/var/run/payproc/daemon"
-
 /* The interval in seconds to check whether to do housekeeping.  */
 #define TIMERTICK_INTERVAL  30
 
@@ -258,7 +255,7 @@ cleanup (void)
   done = 1;
 
   if (remove_socket_flag)
-    remove (SOCKET_NAME);
+    remove (PAYPROCD_SOCKET_NAME);
 }
 
 
@@ -400,7 +397,7 @@ launch_server (const char *logfile)
   int fd;
   pid_t pid;
 
-  fd = create_socket (SOCKET_NAME);
+  fd = create_socket (PAYPROCD_SOCKET_NAME);
   fflush (NULL);
   pid = fork ();
   if (pid == (pid_t)-1)
