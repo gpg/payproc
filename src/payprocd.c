@@ -654,12 +654,12 @@ housekeeping_thread (void *arg)
       return NULL;
     }
   sentinel++;
-  if (opt.verbose)
+  if (opt.verbose > 1)
     log_info ("starting housekeeping\n");
 
   session_housekeeping ();
 
-  if (opt.verbose)
+  if (opt.verbose > 1)
     log_info ("finished with housekeeping\n");
   sentinel--;
   return NULL;

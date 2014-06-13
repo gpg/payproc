@@ -144,3 +144,8 @@ The following sub-commands are available:
    Store or update the given data in the session.  Deleting an item
    from the session dictionary is possible by putting an empty string
    for it.
+
+** PPIPNHD
+
+This command is used exclusively by the =ppipnhd= CGI to have payprocd
+handle PayPal IPN requests.

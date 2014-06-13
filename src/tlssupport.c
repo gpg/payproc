@@ -33,6 +33,17 @@
 #include "http.h"
 #include "tlssupport.h"
 
+/* static void */
+/* my_gnutls_log (int level, const char *text) */
+/* { */
+/*   size_t n; */
+
+/*   n = strlen (text); */
+/*   if (n && text[n-1] == '\n') */
+/*     n--; */
+/*   log_debug ("gnutls:L%d: %.*s\n", level, (int)n, text); */
+/* } */
+
 
 /* This is called by the HTTP module to authenticate a connection.  */
 static gpg_error_t
@@ -53,6 +64,9 @@ init_tls_subsystem (void)
   rc = gnutls_global_init ();
   if (rc)
     log_fatal ("gnutls_global_init failed: %s\n", gnutls_strerror (rc));
+
+  /* gnutls_global_set_log_function (my_gnutls_log); */
+  /* gnutls_global_set_log_level (10); */
 
   http_register_tls_callback (verify_callback);
   http_register_tls_ca ("/etc/payproc/tls-ca.pem");
