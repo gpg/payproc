@@ -97,6 +97,10 @@ void log_flush (void);
    linefeed, otherwise print an entire debug line with TEXT followed
    by the hexdump and a final LF.  */
 void log_printhex (const char *text, const void *buffer, size_t length);
+void log_printval (const char *prefix, const char *value);
+
+void log_printkeyval (const char *prefix, const char *key, const char *value);
+
 
 void log_clock (const char *string);
 

@@ -129,6 +129,7 @@ struct keyvalue_s
 typedef struct keyvalue_s *keyvalue_t;
 
 gpg_error_t keyvalue_append_with_nl (keyvalue_t kv, const char *value);
+void keyvalue_remove_nl (keyvalue_t kv);
 gpg_error_t keyvalue_put (keyvalue_t *list,
                                const char *key, const char *value);
 gpg_error_t keyvalue_del (keyvalue_t list, const char *key);
@@ -137,8 +138,11 @@ gpg_error_t keyvalue_putf (keyvalue_t *list, const char *key,
 void keyvalue_release (keyvalue_t kv);
 keyvalue_t keyvalue_find (keyvalue_t list, const char *key);
 const char *keyvalue_get (keyvalue_t list, const char *key);
+char *keyvalue_snatch (keyvalue_t list, const char *key);
 const char *keyvalue_get_string (keyvalue_t list, const char *key);
 int         keyvalue_get_int (keyvalue_t list, const char *key);
+
+gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, char *string);
 
 int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);

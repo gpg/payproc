@@ -878,6 +878,67 @@ log_printhex (const char *text, const void *buffer, size_t length)
 }
 
 
+static void
+print_sanitized (const char *string)
+{
+  const unsigned char *s = string;
+
+  for (; *s; s++)
+    {
+      if (*s < 0x20 || *s == 0x7f || *s == '\\')
+        {
+          if (*s == '\n')
+            log_printf ("\\n");
+          else if (*s == '\r')
+            log_printf ("\\r");
+          else if (*s == '\f')
+            log_printf ("\\f");
+          else if (*s == '\v')
+            log_printf ("\\v");
+          else if (*s == '\b')
+            log_printf ("\\b");
+          else if (!*s)
+            log_printf ("\\0");
+          else
+            log_printf ("\\x%02x", *s);
+        }
+      else
+        log_printf ("%c", *s);
+    }
+}
+
+
+/* Print a key and a value after sanitizing it.  With PREFIX of NULL
+   print just the value, with PREFIX being an empty string, print a
+   trailing linefeed, otherwise print the prefix, the value, abd the
+   LF. */
+void
+log_printval (const char *prefix, const char *value)
+{
+  if (prefix && *prefix)
+    log_info ("%s", prefix);
+  if (value)
+    print_sanitized (value);
+  if (prefix)
+    log_printf ("\n");
+}
+
+
+void
+log_printkeyval (const char *prefix, const char *key, const char *value)
+{
+  if (prefix)
+    log_info ("%s", prefix);
+  if (key)
+    print_sanitized (key);
+  log_printf ("=");
+  if (value)
+    print_sanitized (value);
+  log_printf ("\n");
+}
+
+
+
 /*
 void
 log_printcanon () {}

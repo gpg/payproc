@@ -305,6 +305,22 @@ keyvalue_append_with_nl (keyvalue_t kv, const char *value)
 }
 
 
+/* Remove all newlines from the value of KV.  This is done in place
+   and and works always.  */
+void
+keyvalue_remove_nl (keyvalue_t kv)
+{
+  char *s, *d;
+
+  if (!kv || !kv->value)
+    return;
+  for (s = d = kv->value; *s; s++)
+    if (*s != '\n')
+      *d++ = *s;
+  *d = 0;
+}
+
+
 gpg_error_t
 keyvalue_put (keyvalue_t *list, const char *key, const char *value)
 {
@@ -396,6 +412,25 @@ keyvalue_get (keyvalue_t list, const char *key)
 }
 
 
+/* Same as keyvalue_get put return the value as a modifiable string
+   and the value in LIST to NULL.  The caller must xfree the
+   result.  */
+char *
+keyvalue_snatch (keyvalue_t list, const char *key)
+{
+  keyvalue_t kv;
+
+  for (kv = list; kv; kv = kv->next)
+    if (!strcmp (kv->name, key))
+      {
+        char *p = kv->value;
+        kv->value = NULL;
+        return p;
+      }
+  return NULL;
+}
+
+
 const char *
 keyvalue_get_string (keyvalue_t list, const char *key)
 {
@@ -412,6 +447,68 @@ keyvalue_get_int (keyvalue_t list, const char *key)
     return 0;
   return atoi (s);
 }
+
+
+
+/* Parse the www-form-urlencoded data in STRING into a new dictionary
+   and store that dictionary at R_DICT.  On error store NULL at R_DICT
+   and return an error code.  Note that STRING will be modified on
+   return. */
+gpg_error_t
+parse_www_form_urlencoded (keyvalue_t *r_dict, char *string)
+{
+  gpg_error_t err;
+  char *endp, *name, *value;
+  size_t n;
+  keyvalue_t dict = NULL;
+
+  *r_dict = NULL;
+
+  do
+    {
+      endp = strchr (string, '&');
+      if (endp)
+        *endp = 0;
+
+      name = string;
+      value = strchr (name, '=');
+      if (value)
+        *value++ = 0;
+
+      name[(n=percent_plus_unescape_inplace (name, 0))] = 0;
+      if (!n || strlen (name) != n)
+        {
+          keyvalue_release (dict);
+          return gpg_error (GPG_ERR_INV_VALUE); /* Nul in name or empty.  */
+        }
+
+      if (value)
+        {
+          value[(n=percent_plus_unescape_inplace (value, 0))] = 0;
+          if (strlen (value) != n)
+            {
+              keyvalue_release (dict);
+              return gpg_error (GPG_ERR_INV_VALUE); /* Nul in value.  */
+            }
+        }
+
+      err = keyvalue_put (&dict, name, value? value:"");
+      if (err)
+        {
+          keyvalue_release (dict);
+          return err;
+        }
+
+      if (endp)
+        string = endp + 1;
+    }
+  while (endp);
+
+  *r_dict = dict;
+  return 0;
+}
+
+
 
 
 /* Mapping table for zb32.  */
