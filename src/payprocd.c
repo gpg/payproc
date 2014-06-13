@@ -261,9 +261,6 @@ main (int argc, char **argv)
   if (log_get_errorcount (0))
     exit (2);
 
-  if (opt.livemode)
-    log_fatal ("live mode rejected - we need more testing first\n");
-
   /* Start the server.  */
   launch_server (logfile);
 
