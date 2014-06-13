@@ -21,7 +21,7 @@
 #define PAYPAL_H
 
 /*-- paypal-ipn.c --*/
-void paypal_proc_ipn (unsigned int idno, keyvalue_t *dict);
+void paypal_proc_ipn (keyvalue_t *dict);
 
 
 #endif /*PAYPAL_H*/

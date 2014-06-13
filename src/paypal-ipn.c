@@ -130,10 +130,9 @@ call_verify (int live, const char *request)
 /* The connection has already been shutdown but the request has been
    stored in the dictionary DICT.  We extract the original full
    request, validate it with Paypal and then do something with the
-   received notification.  IDNO is the original connection id for
-   logging.  */
+   received notification.  */
 void
-paypal_proc_ipn (unsigned int idno, keyvalue_t *dict)
+paypal_proc_ipn (keyvalue_t *dict)
 {
   gpg_error_t err;
   keyvalue_t kv;
@@ -145,19 +144,19 @@ paypal_proc_ipn (unsigned int idno, keyvalue_t *dict)
   request = keyvalue_snatch (*dict, "Request");
   if (!request || !*request)
     {
-      log_error ("ppipnhd %u: no request given\n", idno);
+      log_error ("ppipnhd: no request given\n");
       xfree (request);
       return;
     }
 
-  log_info ("ppipnhd %u: length of request=%zu\n", idno, strlen (request));
+  log_info ("ppipnhd: length of request=%zu\n", strlen (request));
 
   /* Parse it into a dictionary.  */
   err = parse_www_form_urlencoded (&form, request);
   if (err)
     {
-      log_error ("ppipnhd %u: error parsing request: %s\n",
-                 idno, gpg_strerror (err));
+      log_error ("ppipnhd: error parsing request: %s\n",
+                 gpg_strerror (err));
       goto leave;
     }
 
@@ -169,18 +168,18 @@ paypal_proc_ipn (unsigned int idno, keyvalue_t *dict)
   if (strcmp (keyvalue_get_string (form, "receiver_email"),
               "paypal-test@g10code.com"))
     {
-      log_error ("ppipnhd %u: wrong receiver_email\n", idno);
+      log_error ("ppipnhd: wrong receiver_email\n");
       log_printval ("  mail=", keyvalue_get_string (form, "receiver_email"));
       goto leave;
     }
 
   if (call_verify (!keyvalue_get_int (form, "test_ipn"), request))
     {
-      log_error ("ppipnhd %u: IPN is not authentic\n", idno);
+      log_error ("ppipnhd: IPN is not authentic\n");
       goto leave;
     }
 
-  log_info ("ppipnhd %u: IPN is okay\n", idno);
+  log_info ("ppipnhd: IPN accepted\n");
 
   /* Check for duplicates.  */
 

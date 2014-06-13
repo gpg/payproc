@@ -60,6 +60,10 @@ static int shutdown_pending;
 /* Number of active connections.  */
 static int active_connections;
 
+/* The thread specific data key.  */
+static npth_key_t my_tsd_key;
+
+
 /* Constants to identify the options. */
 enum opt_values
   {
@@ -160,6 +164,24 @@ set_stripe_key (const char *fname)
 }
 
 
+/* This callback is used by the log functions to return an identifier
+   for the current thread.  */
+static int
+pid_suffix_callback (unsigned long *r_suffix)
+{
+  unsigned int *idnop;
+
+  idnop = npth_getspecific (my_tsd_key);
+  if (!idnop)
+    {
+      *r_suffix = 0;
+      return 0; /* No suffix.  */
+    }
+  *r_suffix = *idnop;
+  return 2; /* Print the suffix in hex format.  */
+}
+
+
 int
 main (int argc, char **argv)
 {
@@ -190,6 +212,11 @@ main (int argc, char **argv)
       cleanup ();
       exit (1);
     }
+
+  if (!npth_key_create (&my_tsd_key, NULL))
+    if (!npth_setspecific (my_tsd_key, NULL))
+      log_set_pid_suffix_cb (pid_suffix_callback);
+
 
   /* Check that Libgcrypt is suitable.  */
   gcry_control (GCRYCTL_DISABLE_SECMEM, 0);
@@ -749,28 +776,31 @@ static void *
 connection_thread (void *arg)
 {
   conn_t conn = arg;
+  unsigned int idno;
   pid_t pid;
   uid_t uid;
   gid_t gid;
 
+  idno = id_from_connection_obj (conn);
+  npth_setspecific (my_tsd_key, &idno);
+
   if (credentials_from_socket (fd_from_connection_obj (conn), &pid, &uid, &gid))
     {
-      log_error ("connection %u: credentials missing - closing\n",
-                 id_from_connection_obj (conn));
+      log_error ("credentials missing - closing\n");
       goto leave;
     }
 
   if (opt.verbose)
-    log_info ("connection %u: started - pid=%u uid=%u gid=%u\n",
-              id_from_connection_obj (conn),
+    log_info ("new connection - pid=%u uid=%u gid=%u\n",
               (unsigned int)pid, (unsigned int)uid, (unsigned int)gid);
 
   connection_handler (conn);
 
   if (opt.verbose)
-    log_info ("connection %u: terminated\n", id_from_connection_obj (conn));
+    log_info ("connection terminated\n");
 
  leave:
   release_connection_obj (conn);
+  npth_setspecific (my_tsd_key, NULL);  /* To be safe.  */
   return NULL;
 }

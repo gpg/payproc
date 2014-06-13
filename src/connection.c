@@ -922,7 +922,7 @@ connection_handler (conn_t conn)
          socket, and only then process the IPN.  */
       es_fputs ("OK\n\n", conn->stream);
       shutdown_connection_obj (conn);
-      paypal_proc_ipn (conn->idno, &conn->dataitems);
+      paypal_proc_ipn (&conn->dataitems);
     }
   else if ((cmdargs = has_leading_keyword (conn->command, "GETINFO")))
     err = cmd_getinfo (conn, cmdargs);
