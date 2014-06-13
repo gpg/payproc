@@ -141,9 +141,10 @@ AM_PATH_GPG_ERROR("$NEED_GPG_ERROR_VERSION",
 #
 AM_PATH_NPTH("$NEED_NPTH_API:$NEED_NPTH_VERSION",have_npth=yes,have_npth=no)
 if test "$have_npth" = "yes"; then
-  # We define this macro because some code parts require it.
   AC_DEFINE(HAVE_NPTH, 1,
               [Defined if the New Portable Thread Library is available])
+  AC_DEFINE(USE_NPTH, 1,
+              [Defined if support for nPth is requested and nPth is available])
 else
   AC_MSG_WARN([[
 ***
@@ -151,7 +152,6 @@ else
 *** we need the New Portable Threads Library.
 ***]])
 fi
-AC_DEFINE(USE_NPTH, 1, [Defined to use New Portable Thread Library])
 
 
 #
@@ -168,9 +168,18 @@ AM_PATH_LIBGCRYPT("$NEED_LIBGCRYPT_API:$NEED_LIBGCRYPT_VERSION",
 PKG_CHECK_MODULES([LIBGNUTLS], [gnutls >= $NEED_GNUTLS_VERSION],
                                [have_gnutls=yes],
                                [have_gnutls=no])
-AC_SUBST([LIBGNUTLS_CFLAGS])
-AC_SUBST([LIBGNUTLS_LIBS])
-AC_DEFINE(HTTP_USE_GNUTLS, 1, [Enable GNUTLS support in http.c])
+if test "$have_gnutls" = "yes"; then
+  AC_SUBST([LIBGNUTLS_CFLAGS])
+  AC_SUBST([LIBGNUTLS_LIBS])
+  AC_DEFINE(HTTP_USE_GNUTLS, 1, [Enable GNUTLS support in http.c])
+else
+  tmp=$(echo "$LIBGNUTLS_PKG_ERRORS" | tr '\n' '\v' | sed 's/\v/\n*** /g')
+  AC_MSG_WARN([[
+***
+*** GNUTLS not found
+***
+*** $tmp]])
+fi
 
 
 AC_MSG_NOTICE([checking for networking options])
@@ -387,7 +396,7 @@ if test "$have_npth" = "no"; then
     die=yes
     AC_MSG_NOTICE([[
 ***
-*** It is now required to build with support for the
+*** It is required to build with support for the
 *** New Portable Threads Library (nPth). Please install this
 *** library first.  The library is for example available at
 ***   ftp://ftp.gnupg.org/gcrypt/npth/
@@ -402,6 +411,16 @@ if test "$have_libgcrypt" = "no"; then
 **  This library is for example available at
 ***   ftp://ftp.gnupg.org/gcrypt/libgcrypt/
 *** (at least version $NEED_LIBGCRYPT_VERSION (API $NEED_LIBGCRYPT_API) is required.)
+***]])
+fi
+if test "$have_gnutls" = "no"; then
+   die=yes
+   AC_MSG_NOTICE([[
+***
+*** You need GNUTLS to build this program.
+**  This library is for example available at
+***   ftp://ftp.gnutls.org/gcrypt/gnutls/
+*** (at least version $NEED_GNUTLS_VERSION is required.)
 ***]])
 fi
 

@@ -78,6 +78,7 @@ enum
     HTTP_FLAG_TRY_PROXY = 1,     /* Try to use a proxy.  */
     HTTP_FLAG_SHUTDOWN = 2,      /* Close sending end after the request.  */
     HTTP_FLAG_LOG_RESP = 8,      /* Log the server respone.  */
+    HTTP_FLAG_FORCE_TLS = 16,    /* Force the use opf TLS.  */
     HTTP_FLAG_IGNORE_CL = 32,    /* Ignore content-length.  */
     HTTP_FLAG_IGNORE_IPv4 = 64,  /* Do not use IPv4.  */
     HTTP_FLAG_IGNORE_IPv6 = 128  /* Do not use IPv6.  */
@@ -95,7 +96,13 @@ void http_register_tls_ca (const char *fname);
 
 gpg_error_t http_session_new (http_session_t *r_session,
                               const char *tls_priority);
+http_session_t http_session_ref (http_session_t sess);
 void http_session_release (http_session_t sess);
+
+void http_session_set_log_cb (http_session_t sess,
+                              void (*cb)(http_session_t, gpg_error_t,
+                                         const char *,
+                                         const void **, size_t *));
 
 
 gpg_error_t http_parse_uri (parsed_uri_t *ret_uri, const char *uri,
@@ -109,6 +116,7 @@ gpg_error_t http_raw_connect (http_t *r_hd,
 
 gpg_error_t http_open (http_t *r_hd, http_req_t reqtype,
                        const char *url,
+                       const char *httphost,
                        const char *auth,
                        unsigned int flags,
                        const char *proxy,
@@ -134,6 +142,7 @@ gpg_error_t http_open_document (http_t *r_hd,
 estream_t http_get_read_ptr (http_t hd);
 estream_t http_get_write_ptr (http_t hd);
 unsigned int http_get_status_code (http_t hd);
+const char *http_get_tls_info (http_t hd, const char *what);
 const char *http_get_header (http_t hd, const char *name);
 const char **http_get_header_names (http_t hd);
 gpg_error_t http_verify_server_credentials (http_session_t sess);
