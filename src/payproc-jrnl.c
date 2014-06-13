@@ -71,9 +71,9 @@ static ARGPARSE_OPTS opts[] = {
 static char *jrnl_field_names[] =
   {
     "_lnr", /* virtual field.  */
-    "date", "type", "account", "currency", "amount",
-    "desc", "mail", "meta", "last4", "service",
-    "chargeid", "blnxtxid"
+    "date", "type", "live", "currency", "amount",
+    "desc", "mail", "meta", "last4", "service", "account",
+    "chargeid", "txid", "rtxid"
   };
 
 

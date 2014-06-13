@@ -38,7 +38,7 @@
    |    |          | $ := system record                             |
    |    |          | C := credit card charge                        |
    |    |          | R := credit card refund                        |
-   |  3 | account  | Even numbers are test accounts.                |
+   |  3 | live     | 1 if this is not a test account                |
    |  4 | currency | 3 letter ISO code for the currency (lowercase) |
    |  5 | amount   | Amount with decimal point                      |
    |  6 | desc     | Description for this transaction               |
@@ -46,8 +46,10 @@
    |  8 | meta     | Structured field with additional data          |
    |  9 | last4    | The last 4 digits of the card                  |
    | 10 | service  | Payment service (0=n/a, 1=stripe.com)          |
-   | 11 | chargeid | Charge id                                      |
-   | 12 | blntxid  | Balance transaction id                         |
+   | 11 | account  | Account number                                 |
+   | 12 | chargeid | Charge id                                      |
+   | 13 | txid     | Transaction id                                 |
+   | 14 | rtxid    | Reference txid (e.g. for refunds)              |
    |----+----------+------------------------------------------------|
 
    Because of the multithreaded operation it may happen that records
@@ -346,9 +348,11 @@ jrnl_store_charge_record (keyvalue_t *dictp)
   write_escaped (keyvalue_get_string (dict, "Email"), fp);
   write_meta (dict, fp);
   write_escaped (keyvalue_get_string (dict, "Last4"), fp);
-  es_fputs ("1:", fp);
+  es_fputs ("1:", fp);  /* service: Stripe = 1 */
+  es_fputs ("1:", fp);  /* account */
   write_escaped (keyvalue_get_string (dict, "Charge-Id"), fp);
   write_escaped (keyvalue_get_string (dict, "balance-transaction"), fp);
+  es_fputs (":", fp);   /* rtxid */
 
   write_and_close_fp (fp);
 }
