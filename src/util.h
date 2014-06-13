@@ -142,7 +142,7 @@ char *keyvalue_snatch (keyvalue_t list, const char *key);
 const char *keyvalue_get_string (keyvalue_t list, const char *key);
 int         keyvalue_get_int (keyvalue_t list, const char *key);
 
-gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, char *string);
+gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data);
 
 int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);

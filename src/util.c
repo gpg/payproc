@@ -450,19 +450,27 @@ keyvalue_get_int (keyvalue_t list, const char *key)
 
 
 
-/* Parse the www-form-urlencoded data in STRING into a new dictionary
-   and store that dictionary at R_DICT.  On error store NULL at R_DICT
-   and return an error code.  Note that STRING will be modified on
+/* Parse the www-form-urlencoded DATA into a new dictionary and store
+   that dictionary at R_DICT.  On error store NULL at R_DICT and
+   return an error code.  Note that STRING will be modified on
    return. */
 gpg_error_t
-parse_www_form_urlencoded (keyvalue_t *r_dict, char *string)
+parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data)
 {
   gpg_error_t err;
-  char *endp, *name, *value;
+  char *string, *endp, *name, *value;
   size_t n;
+  char *buffer = NULL;
   keyvalue_t dict = NULL;
 
   *r_dict = NULL;
+
+  string = buffer = xtrystrdup (data);
+  if (!string)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
 
   do
     {
@@ -478,8 +486,8 @@ parse_www_form_urlencoded (keyvalue_t *r_dict, char *string)
       name[(n=percent_plus_unescape_inplace (name, 0))] = 0;
       if (!n || strlen (name) != n)
         {
-          keyvalue_release (dict);
-          return gpg_error (GPG_ERR_INV_VALUE); /* Nul in name or empty.  */
+          err = gpg_error (GPG_ERR_INV_VALUE); /* Nul in name or empty.  */
+          goto leave;
         }
 
       if (value)
@@ -487,17 +495,14 @@ parse_www_form_urlencoded (keyvalue_t *r_dict, char *string)
           value[(n=percent_plus_unescape_inplace (value, 0))] = 0;
           if (strlen (value) != n)
             {
-              keyvalue_release (dict);
-              return gpg_error (GPG_ERR_INV_VALUE); /* Nul in value.  */
+              err = gpg_error (GPG_ERR_INV_VALUE); /* Nul in value.  */
+              goto leave;
             }
         }
 
       err = keyvalue_put (&dict, name, value? value:"");
       if (err)
-        {
-          keyvalue_release (dict);
-          return err;
-        }
+        goto leave;
 
       if (endp)
         string = endp + 1;
@@ -505,7 +510,13 @@ parse_www_form_urlencoded (keyvalue_t *r_dict, char *string)
   while (endp);
 
   *r_dict = dict;
-  return 0;
+  dict = NULL;
+  err = 0;
+
+ leave:
+  keyvalue_release (dict);
+  xfree (buffer);
+  return err;
 }
 
 

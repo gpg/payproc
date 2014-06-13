@@ -114,8 +114,8 @@ call_verify (int live, const char *request)
       goto leave;
     }
 
-  log_debug ("PayPal verification status '%s'\n", response);
-  err = 0;
+  /* log_debug ("PayPal verification status '%s'\n", response); */
+  err = !strcmp (response, "VERIFIED")? 0 : gpg_error (GPG_ERR_NOT_FOUND);
 
  leave:
   http_close (http, 0);
@@ -166,7 +166,8 @@ paypal_proc_ipn (unsigned int idno, keyvalue_t *dict)
 
   /* To avoid useless verification against Paypal we first check the
      mail address.  */
-  if (strcmp (keyvalue_get_string (form, "receiver_email"),"sales@g10code.com"))
+  if (strcmp (keyvalue_get_string (form, "receiver_email"),
+              "paypal-test@g10code.com"))
     {
       log_error ("ppipnhd %u: wrong receiver_email\n", idno);
       log_printval ("  mail=", keyvalue_get_string (form, "receiver_email"));
