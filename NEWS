@@ -1,7 +1,11 @@
       Payproc - The Payment Processor
 
+Noteworthy changes in version 0.3.0 (unreleased)
+------------------------------------------------
+
+
 Noteworthy changes in version 0.2.1 (2014-09-09)
------------------------------------------------
+------------------------------------------------
 
  * Support exchange rates.
 
