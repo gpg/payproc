@@ -98,6 +98,9 @@
    source file and thus is usable in code shared by applications.  */
 extern gpg_err_source_t default_errsource;
 
+/* The size of a buffer suitable to hold a string with an amount.  */
+#define AMOUNTBUF_SIZE 48
+
 
 /*-- util.c --*/
 void *xmalloc (size_t n);

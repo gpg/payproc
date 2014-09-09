@@ -41,6 +41,7 @@
 #include "cred.h"
 #include "journal.h"
 #include "session.h"
+#include "currency.h"
 #include "payprocd.h"
 
 
@@ -503,6 +504,7 @@ launch_server (const char *logfile)
 
   log_info ("payprocd %s started\n", PACKAGE_VERSION);
   jrnl_store_sys_record ("payprocd "PACKAGE_VERSION" started");
+  read_exchange_rates ();
   server_loop (fd);
   close (fd);
 }
@@ -669,8 +671,11 @@ static void *
 housekeeping_thread (void *arg)
 {
   static int sentinel;
+  static int count;
 
   (void)arg;
+
+  count++;
 
   if (sentinel)
     {
@@ -682,6 +687,13 @@ housekeeping_thread (void *arg)
     log_info ("starting housekeeping\n");
 
   session_housekeeping ();
+
+  /* Stuff we do only every hour:  */
+  if (count >= 3600 / HOUSEKEEPING_INTERVAL)
+    {
+      count = 0;
+      read_exchange_rates ();
+    }
 
   if (opt.verbose > 1)
     log_info ("finished with housekeeping\n");

@@ -50,6 +50,7 @@
    | 12 | chargeid | Charge id                                      |
    | 13 | txid     | Transaction id                                 |
    | 14 | rtxid    | Reference txid (e.g. for refunds)              |
+   | 15 | euro     | amount converted to Euro                       |
    |----+----------+------------------------------------------------|
 
    Because of the multithreaded operation it may happen that records
@@ -76,13 +77,14 @@
 #include "estream.h"
 #include "payprocd.h"
 #include "http.h"
+#include "currency.h"
 #include "journal.h"
 
 /* The size of our standard timestamp.  */
 #define TIMESTAMP_SIZE 15
 
 
-/* Infor about an open log file.  */
+/* Info about an open log file.  */
 struct logfile_s
 {
   char *basename;  /* The base name of the file.  */
@@ -321,9 +323,23 @@ jrnl_store_sys_record (const char *text)
   fp = start_record ('$', NULL);
   es_fputs (":::", fp);
   write_escaped (text, fp);
-  es_fputs ("::::::", fp);
+  es_fputs (":::::::::", fp);
   write_and_close_fp (fp);
 }
+
+
+/* Store a currency exchange record in the journal. */
+void
+jrnl_store_exchange_rate_record (const char *currency, double rate)
+{
+  estream_t fp;
+
+  fp = start_record ('$', NULL);  /* System record.  */
+  es_fprintf (fp,"1:%s:%f:new exchange rate:", currency, rate);
+  es_fputs ("::::::::1.0:", fp);
+  write_and_close_fp (fp);
+}
+
 
 /* Create a new record and spool it.  There is no error return because
    the actual transaction has already happened and we want to make
@@ -337,13 +353,15 @@ jrnl_store_charge_record (keyvalue_t *dictp)
   estream_t fp;
   char timestamp[TIMESTAMP_SIZE + 1];
   keyvalue_t dict;
+  const char *curr, *amnt;
+  char amountbuf[AMOUNTBUF_SIZE];
 
   fp = start_record ('C', timestamp);
   keyvalue_put (dictp, "_timestamp", timestamp);
   dict = *dictp;
   es_fprintf (fp, "%d:", (*keyvalue_get_string (dict, "Live") == 't'));
-  write_escaped (keyvalue_get_string (dict, "Currency"), fp);
-  write_escaped (keyvalue_get_string (dict, "Amount"), fp);
+  write_escaped ((curr=keyvalue_get_string (dict, "Currency")), fp);
+  write_escaped ((amnt=keyvalue_get_string (dict, "Amount")), fp);
   write_escaped (keyvalue_get_string (dict, "Desc"), fp);
   write_escaped (keyvalue_get_string (dict, "Email"), fp);
   write_meta (dict, fp);
@@ -353,6 +371,8 @@ jrnl_store_charge_record (keyvalue_t *dictp)
   write_escaped (keyvalue_get_string (dict, "Charge-Id"), fp);
   write_escaped (keyvalue_get_string (dict, "balance-transaction"), fp);
   es_fputs (":", fp);   /* rtxid */
+  es_fputs (convert_currency (amountbuf, sizeof amountbuf, curr, amnt), fp);
+  es_fputs (":", fp);   /* euro */
 
   write_and_close_fp (fp);
 }

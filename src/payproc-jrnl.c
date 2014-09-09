@@ -73,7 +73,7 @@ static char *jrnl_field_names[] =
     "_lnr", /* virtual field.  */
     "date", "type", "live", "currency", "amount",
     "desc", "mail", "meta", "last4", "service", "account",
-    "chargeid", "txid", "rtxid"
+    "chargeid", "txid", "rtxid", "euro"
   };
 
 
@@ -737,7 +737,7 @@ print_meta (char *buffer, const char *name)
 static int
 one_line (const char *fname, unsigned int lnr, char *line)
 {
-  char *field[12];
+  char *field[15];
   int nfields = 0;
 
   /* Parse into fields.  */
@@ -748,7 +748,7 @@ one_line (const char *fname, unsigned int lnr, char *line)
       if (line)
 	*(line++) = '\0';
     }
-  if (nfields < DIM(field))
+  if (nfields < 12)  /* Early versions had only 12 fields.  */
     {
       log_error ("%s:%u: not enough fields - not a Payproc journal?\n",
                  fname, lnr);

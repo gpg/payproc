@@ -32,6 +32,7 @@
 #include "paypal.h"
 #include "journal.h"
 #include "session.h"
+#include "currency.h"
 #include "connection.h"
 
 /* Maximum length of an input line.  */
@@ -56,21 +57,6 @@ struct conn_s
   char *command;         /* The command line (malloced). */
   keyvalue_t dataitems;  /* The data items.  */
   const char *errdesc;   /* Optional description of an error.  */
-};
-
-
-/* The list of supported currencies  */
-static struct
-{
-  const char *name;
-  unsigned char decdigits;
-  const char *desc;
-} currency_table[] = {
-  { "USD", 2, "US Dollar" },
-  { "EUR", 2, "Euro" },
-  { "GBP", 2, "British Pound" },
-  { "JPY", 0, "Yen" },
-  { NULL }
 };
 
 
@@ -366,24 +352,6 @@ write_data_line (keyvalue_t kv, estream_t fp)
  * Helper functions.
  */
 
-/* Check that the currency described by STRING is valid.  Returns true
-   if so.  The number of of digits after the decimal point for that
-   currency is stored at R_DECDIGITS.  */
-static int
-valid_currency_p (const char *string, int *r_decdigits)
-{
-  int i;
-
-  for (i=0; currency_table[i].name; i++)
-    if (!strcasecmp (string, currency_table[i].name))
-      {
-        *r_decdigits = currency_table[i].decdigits;
-        return 1;
-      }
-  return 0;
-}
-
-
 /* Check the amount given in STRING and convert it to the smallest
    currency unit.  DECDIGITS gives the number of allowed post decimal
    positions.  Return 0 on error or the converted amount.  */
@@ -397,7 +365,7 @@ convert_amount (const char *string, int decdigits)
   unsigned int v;
 
   if (*string == '+')
-    string++; /* Skip an optioanl leading plsu sign.  */
+    string++; /* Skip an optioanl leading plus sign.  */
   for (s = string; *s; s++)
     {
       if (*s == '.')
@@ -432,7 +400,7 @@ convert_amount (const char *string, int decdigits)
 }
 
 
-/* Retrun a string with the amount computed from CENTS.  DECDIGITS
+/* Return a string with the amount computed from CENTS.  DECDIGITS
    gives the number of post decimal positions in CENTS.  Return NULL
    on error.  */
 static char *
@@ -774,6 +742,7 @@ cmd_chargecard (conn_t conn, char *args)
    _amount:    The amount converted to an integer (i.e. 10.42 EUR -> 1042)
    Amount:     The amount as above.
    Limit:      If given, the maximum amount acceptable
+   Euro:       If returned, Amount converted to Euro.
 
  */
 static gpg_error_t
@@ -782,9 +751,11 @@ cmd_checkamount (conn_t conn, char *args)
   gpg_error_t err;
   keyvalue_t dict = conn->dataitems;
   keyvalue_t kv;
+  const char *curr;
   const char *s;
   unsigned int cents;
   int decdigs;
+  char amountbuf[AMOUNTBUF_SIZE];
 
   (void)args;
 
@@ -792,8 +763,8 @@ cmd_checkamount (conn_t conn, char *args)
   keyvalue_del (conn->dataitems, "Limit");
 
   /* Get currency and amount.  */
-  s = keyvalue_get_string (dict, "Currency");
-  if (!valid_currency_p (s, &decdigs))
+  curr = keyvalue_get_string (dict, "Currency");
+  if (!valid_currency_p (curr, &decdigs))
     {
       set_error (MISSING_VALUE, "Currency missing or not supported");
       goto leave;
@@ -805,6 +776,12 @@ cmd_checkamount (conn_t conn, char *args)
       set_error (MISSING_VALUE, "Amount missing or invalid");
       goto leave;
     }
+
+  if (*convert_currency (amountbuf, sizeof amountbuf, curr, s))
+    err = keyvalue_put (&conn->dataitems, "Euro", amountbuf);
+  else
+    err = 0;
+
   err = keyvalue_putf (&conn->dataitems, "_amount", "%u", cents);
   dict = conn->dataitems;
   if (err)
@@ -841,10 +818,13 @@ cmd_getinfo (conn_t conn, char *args)
 
   if (has_leading_keyword (args, "list-currencies"))
     {
+      const char *name, *desc;
+      double rate;
+
       es_fputs ("OK\n", conn->stream);
-      for (i=0; currency_table[i].name; i++)
-        es_fprintf (conn->stream, "# %s - %s\n",
-                    currency_table[i].name, currency_table[i].desc);
+      for (i=0; (name = get_currency_info (i, &desc, &rate)); i++)
+        es_fprintf (conn->stream, "# %s %11.4f - %s\n",
+                    name, rate, desc);
     }
   else if (has_leading_keyword (args, "version"))
     {

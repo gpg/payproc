@@ -21,6 +21,7 @@ EXTRA_DIST = cJSON.readme tls-ca.pem
 bin_PROGRAMS = payprocd payproc-jrnl ppipnhd
 noinst_PROGRAMS = $(module_tests) t-http
 noinst_LIBRARIES = libcommon.a libcommonpth.a
+dist_pkglibexec_SCRIPTS = geteuroxref
 
 TESTS = $(module_tests)
 
@@ -47,6 +48,7 @@ utility_sources = \
 payprocd_SOURCES = \
 	payprocd.c payprocd.h \
 	connection.c connection.h \
+	currency.c currency.h \
 	stripe.c stripe.h \
 	paypal-ipn.c paypal.h \
 	tlssupport.c tlssupport.h \
@@ -83,6 +85,6 @@ t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
 
 t_connection_SOURCES = t-connection.c stripe.c paypal-ipn.c \
-                       journal.c session.c $(t_common_sources)
+                       journal.c session.c currency.c $(t_common_sources)
 t_connection_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS)
 t_connection_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS)

@@ -12,5 +12,7 @@ root certificate in /etc/payproc/tls-ca.pem .  The given journal file
 name will be suffixed with the current date and ".log".  The time
 stamp in the journal is given in UTC.
 
+You should also add a cron job for the payproc user to run
+/usr/lib/payproc/geteuroxref each day at about 16:00 CET.
 
 See doc/api-ref.org for a description of supported commands.

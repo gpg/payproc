@@ -1,4 +1,4 @@
-/* journal.h - Definition for journal realted functions
+/* currency.h - Definitions for currency management functions
  * Copyright (C) 2014 g10 Code GmbH
  *
  * This file is part of Payproc.
@@ -17,13 +17,15 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef JOURNAL_H
-#define JOURNAL_H
+#ifndef CURRENCY_H
+#define CURRENCY_H
 
-void jrnl_set_file (const char *fname);
-void jrnl_store_sys_record (const char *text);
-void jrnl_store_exchange_rate_record (const char *currency, double rate);
-void jrnl_store_charge_record (keyvalue_t *dictp);
+void read_exchange_rates (void);
+
+int valid_currency_p (const char *string, int *r_decdigits);
+const char *get_currency_info (int seq, char const **r_desc, double *r_rate);
+char *convert_currency (char *buffer, size_t bufsize,
+                        const char *currency, const char *amount);
 
 
-#endif /*JOURNAL_H*/
+#endif /*CURRENCY_H*/

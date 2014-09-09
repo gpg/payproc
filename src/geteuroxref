@@ -1,0 +1,27 @@
+#!/bin/sh
+
+name=euroxref.dat
+dir=/var/lib/payproc
+file="$dir/$name"
+tfile="$dir/.#$name"
+
+if [ ! -d "$dir" ]; then
+    echo "geteuroxref: directory '$dir' does not exist" >&2
+    exit 1
+fi
+
+wget -qO- https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml \
+    | awk '
+/<Cube time/          { split($0, a, /'\''/); print "# " a[2] }
+/<Cube currency/      { split($0, a, /'\''/); print a[2] "=" a[4];}
+/<\/gesmes:Envelope/  { print "# eof" }
+' >$tfile
+
+if ! grep -q '^# eof' $tfile; then
+    echo "geteuroxref: error retrieving data (check $tfile)" >&2
+    exit 1
+fi
+if ! mv $tfile $file ; then
+    echo "geteuroxref: error storing data" >&2
+    exit 1
+fi
