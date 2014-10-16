@@ -18,7 +18,7 @@
 
 EXTRA_DIST = cJSON.readme tls-ca.pem
 
-bin_PROGRAMS = payprocd payproc-jrnl ppipnhd
+bin_PROGRAMS = payprocd payproc-jrnl payproc-stat ppipnhd
 noinst_PROGRAMS = $(module_tests) t-http
 noinst_LIBRARIES = libcommon.a libcommonpth.a
 dist_pkglibexec_SCRIPTS = geteuroxref
@@ -68,6 +68,10 @@ payprocd_LDADD = -lm libcommonpth.a \
 
 payproc_jrnl_SOURCES = \
         payproc-jrnl.c \
+	$(common_headers)
+
+payproc_stat_SOURCES = \
+        payproc-stat.c \
 	$(common_headers)
 
 ppipnhd_SOURCES = ppipnhd.c
