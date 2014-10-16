@@ -1,4 +1,4 @@
-/* journal.h - Definition for journal realted functions
+/* journal.h - Definition for journal related functions
  * Copyright (C) 2014 g10 Code GmbH
  *
  * This file is part of Payproc.

@@ -27,7 +27,7 @@
 #include "logging.h"
 #include "argparse.h"
 #include "estream.h"
-
+#include "jrnl-fields.h"
 
 /* Constants to identify the options. */
 enum opt_values
@@ -71,9 +71,21 @@ static ARGPARSE_OPTS opts[] = {
 static char *jrnl_field_names[] =
   {
     "_lnr", /* virtual field.  */
-    "date", "type", "live", "currency", "amount",
-    "desc", "mail", "meta", "last4", "service", "account",
-    "chargeid", "txid", "rtxid", "euro"
+    JRNL_FIELD_NAME_DATE,
+    JRNL_FIELD_NAME_TYPE,
+    JRNL_FIELD_NAME_LIVE,
+    JRNL_FIELD_NAME_CURRENCY,
+    JRNL_FIELD_NAME_AMOUNT,
+    JRNL_FIELD_NAME_DESC,
+    JRNL_FIELD_NAME_MAIL,
+    JRNL_FIELD_NAME_META,
+    JRNL_FIELD_NAME_LAST4,
+    JRNL_FIELD_NAME_SERVICE,
+    JRNL_FIELD_NAME_ACCOUNT,
+    JRNL_FIELD_NAME_CHARGEID,
+    JRNL_FIELD_NAME_TXID,
+    JRNL_FIELD_NAME_RTXID,
+    JRNL_FIELD_NAME_EURO
   };
 
 
@@ -737,7 +749,7 @@ print_meta (char *buffer, const char *name)
 static int
 one_line (const char *fname, unsigned int lnr, char *line)
 {
-  char *field[15];
+  char *field[NO_OF_JRNL_FIELDS];
   int nfields = 0;
 
   /* Parse into fields.  */
@@ -775,8 +787,8 @@ one_line (const char *fname, unsigned int lnr, char *line)
             {
               if (of->meta)
                 {
-                  if (nfields > 7)
-                    print_meta (field[7], of->name);
+                  if (nfields > JRNL_FIELD_META)
+                    print_meta (field[JRNL_FIELD_META], of->name);
                 }
               else if (!of->fnr)
                 es_printf ("%u", lnr);

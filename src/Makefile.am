@@ -36,6 +36,9 @@ common_sources = \
 	percent.c \
 	argparse.c argparse.h
 
+common_headers = \
+	jrnl-fields.h
+
 libcommon_a_SOURCES = $(common_sources)
 libcommon_a_CFLAGS = $(AM_CFLAGS) $(LIBGPG_ERROR_CFLAGS) -DWITHOUT_NPTH=1
 libcommonpth_a_SOURCES = $(common_sources)
@@ -55,6 +58,7 @@ payprocd_SOURCES = \
 	cred.c cred.h \
 	journal.c journal.h \
 	session.c session.h \
+	$(common_headers) \
 	$(utility_sources)
 payprocd_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGCRYPT_CFLAGS) \
                   $(LIBGNUTLS_CFLAGS)
@@ -63,7 +67,8 @@ payprocd_LDADD = -lm libcommonpth.a \
                   $(LIBGNUTLS_LIBS)
 
 payproc_jrnl_SOURCES = \
-        payproc-jrnl.c
+        payproc-jrnl.c \
+	$(common_headers)
 
 ppipnhd_SOURCES = ppipnhd.c
 ppipnhd_CFLAGS =
