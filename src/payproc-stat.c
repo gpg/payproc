@@ -24,7 +24,7 @@
   YEAR and MONTH and with no duplicate values.  Each line describes
   statistics for the indicated year and month.  The line format is:
 
-    YEAR:MONTH::TAG::N:EURO:
+    YEAR:MONTH:X1:TAG:TAGLNR:X2:N:EURO:NYR:EUROYR:
 
   YEAR  - the year (eg. 2014)
   MONTH - the month (1..12, with or without a leading zero)
@@ -36,8 +36,8 @@
   X2    - Reserved
   N     - The number of charge records in that month
   EURO  - The total amount from the charge records in that month.
-
-  (Note that there are two reserved fields).
+  NYR   - The number of charge records in that year
+  EUROYR- The total amount in that year up to this month.
 
  */
 
@@ -161,6 +161,9 @@ struct stat_record_s
   unsigned int n;
   unsigned long euro;
   unsigned long cent;
+  unsigned int nyr;
+  unsigned long euroyr;
+  unsigned long centyr;
   char tag[MAX_TAGLEN+1];
   unsigned int taglnr;
   int update;      /* Set if initialized by read_stat_file.  */
@@ -181,7 +184,7 @@ static int parse_fieldname (char *name, int *r_meta, unsigned int *r_fnr);
 static selectexpr_t parse_selectexpr (const char *expr);
 static void one_file (const char *fname);
 static void read_stat_file (const char *fname);
-static void sort_statrecords (void);
+static void postprocess_statrecords (void);
 static void print_output (void);
 
 
@@ -277,7 +280,7 @@ main (int argc, char **argv)
 
   if (!log_get_errorcount (0))
     {
-      sort_statrecords ();
+      postprocess_statrecords ();
       print_output ();
     }
 
@@ -820,13 +823,13 @@ one_file (const char *fname)
 static int
 read_stat_line (const char *fname, unsigned int lnr, char *line)
 {
-  char *field[8];
+  char *field[12];
   int nfields = 0;
   int year, month;
   const char *s;
   const char *tag;
   unsigned int taglnr;
-  unsigned long euro, cent;
+  unsigned long euro, cent, euroyr, centyr;
   stat_record_t rec;
 
   /* Parse into fields.  */
@@ -837,7 +840,7 @@ read_stat_line (const char *fname, unsigned int lnr, char *line)
       if (line)
 	*(line++) = '\0';
     }
-  if (nfields < 7)
+  if (nfields < 9)
     {
       log_error ("%s:%u: not enough fields - not a Payproc stat file?\n",
                  fname, lnr);
@@ -866,6 +869,11 @@ read_stat_line (const char *fname, unsigned int lnr, char *line)
   s = strchr (s, '.');
   cent = s? strtoul (s+1, NULL, 10) : 0;
 
+  s = field[9];
+  euroyr = strtoul (s, NULL, 10);
+  s = strchr (s, '.');
+  centyr = s? strtoul (s+1, NULL, 10) : 0;
+
   rec = find_stat_record (year, month);
   /* We always expect a new clean record - if not the input file has a
      double year/month line.  */
@@ -880,6 +888,9 @@ read_stat_line (const char *fname, unsigned int lnr, char *line)
   rec->n = strtoul (field[6], NULL, 10);
   rec->euro = euro;
   rec->cent = cent;
+  rec->nyr = strtoul (field[8], NULL, 10);
+  rec->euroyr = euroyr;
+  rec->centyr = centyr;
   rec->update = 1;
 
   return 0;
@@ -930,7 +941,7 @@ read_stat_file (const char *fname)
 }
 
 
-/* Sort the records in reverse order.  */
+/* Sort the records.  */
 static int
 sort_statrecords_cmp (const void *xa, const void *xb)
 {
@@ -942,22 +953,62 @@ sort_statrecords_cmp (const void *xa, const void *xb)
       if (a->month == b->month)
         return 0;
       else if (a->month > b->month)
-        return -1;
-      else
         return 1;
+      else
+        return -1;
     }
   else if (a->year > b->year)
-    return -1;
-  else
     return 1;
+  else
+    return -1;
+}
+
+
+/* Sort the records in reverse order.  */
+static int
+sort_statrecords_cmprev (const void *xa, const void *xb)
+{
+  return -sort_statrecords_cmp (xa, xb);
 }
 
 
 static void
-sort_statrecords (void)
+postprocess_statrecords (void)
 {
+  int i;
+  stat_record_t rec;
+  int year;
+  unsigned int nyr;
+  unsigned long euroyr, centyr;
+
   qsort (statrecords, DIM(statrecords),
          sizeof *statrecords, sort_statrecords_cmp);
+
+  /* Insert the totals per year.  */
+  nyr = 0;
+  euroyr = centyr = 0;
+  year = 0;
+  for (i=0; i < DIM (statrecords); i++)
+    if ((rec = statrecords + i), rec->year)
+      {
+        if (rec->year != year)
+          {
+            nyr = 0;
+            euroyr = centyr = 0;
+            year = rec->year;
+          }
+        nyr += rec->n;
+        euroyr += rec->euro;
+        centyr += rec->cent;
+
+        rec->nyr = nyr;
+        rec->euroyr = euroyr;
+        rec->centyr = centyr;
+      }
+
+  /* The output shall be in reverse chronological order.  */
+  qsort (statrecords, DIM(statrecords),
+         sizeof *statrecords, sort_statrecords_cmprev);
 }
 
 
@@ -966,7 +1017,7 @@ print_output (void)
 {
   int i;
   stat_record_t rec;
-  unsigned long euro, cent;
+  unsigned long euro, cent, euroyr, centyr;
 
   for (i=0; i < DIM (statrecords); i++)
     if ((rec = statrecords + i), rec->year)
@@ -975,9 +1026,14 @@ print_output (void)
         cent = rec->cent;
         euro += cent / 100;
         cent %= 100;
-        printf ("%d:%02d::%s:%u::%u:%lu.%02lu:\n",
+        euroyr = rec->euroyr;
+        centyr = rec->centyr;
+        euroyr += centyr / 100;
+        centyr %= 100;
+        printf ("%d:%02d::%s:%u::%u:%lu.%02lu:%u:%lu.%02lu:\n",
                 rec->year, rec->month, rec->tag, rec->taglnr,
-                rec->n, euro, cent);
+                rec->n, euro, cent,
+                rec->nyr, euroyr, centyr);
       }
 
   if (fflush (stdout) == EOF)
