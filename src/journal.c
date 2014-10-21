@@ -45,7 +45,7 @@
    |  7 | mail     | Email address                                  |
    |  8 | meta     | Structured field with additional data          |
    |  9 | last4    | The last 4 digits of the card                  |
-   | 10 | service  | Payment service (0=n/a, 1=stripe.com)          |
+   | 10 | service  | Payment service (0=n/a, 1=stripe.com, 2=PayPal)|
    | 11 | account  | Account number                                 |
    | 12 | chargeid | Charge id                                      |
    | 13 | txid     | Transaction id                                 |
@@ -348,7 +348,7 @@ jrnl_store_exchange_rate_record (const char *currency, double rate)
    it better to have a non-working web form than to have too many non
    recorded transaction.  Adds "_timestamp" record into DICT.  */
 void
-jrnl_store_charge_record (keyvalue_t *dictp)
+jrnl_store_charge_record (keyvalue_t *dictp, int service)
 {
   estream_t fp;
   char timestamp[TIMESTAMP_SIZE + 1];
@@ -366,7 +366,7 @@ jrnl_store_charge_record (keyvalue_t *dictp)
   write_escaped (keyvalue_get_string (dict, "Email"), fp);
   write_meta (dict, fp);
   write_escaped (keyvalue_get_string (dict, "Last4"), fp);
-  es_fputs ("1:", fp);  /* service: Stripe = 1 */
+  es_fprintf (fp, "%d:", service);
   es_fputs ("1:", fp);  /* account */
   write_escaped (keyvalue_get_string (dict, "Charge-Id"), fp);
   write_escaped (keyvalue_get_string (dict, "balance-transaction"), fp);

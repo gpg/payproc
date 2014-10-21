@@ -31,55 +31,11 @@
 #include "membuf.h"
 #include "cJSON.h"
 #include "payprocd.h"
+#include "form.h"
 #include "stripe.h"
 
 
 #define STRIPE_HOST "https://api.stripe.com"
-
-
-/* Encode the data in FORM for use with POST.  */
-gpg_error_t
-encode_formdata (keyvalue_t form, char **r_encoded)
-{
-  gpg_error_t err;
-  membuf_t mb;
-  keyvalue_t kv;
-  char *escaped;
-
-  *r_encoded = NULL;
-
-  init_membuf (&mb, 0);
-  for (kv = form; kv; kv = kv->next)
-    {
-      if (kv != form)
-        put_membuf_str (&mb, "&");
-      escaped = http_escape_string (kv->name, NULL/*form-encoding*/);
-      if (!escaped)
-        {
-          err = gpg_error_from_syserror ();
-          xfree (get_membuf (&mb, NULL));
-          return err;
-        }
-      put_membuf_str (&mb, escaped);
-      xfree (escaped);
-      put_membuf_str (&mb, "=");
-      escaped = http_escape_string (kv->value, NULL/*form-encoding*/);
-      if (!escaped)
-        {
-          err = gpg_error_from_syserror ();
-          xfree (get_membuf (&mb, NULL));
-          return err;
-        }
-      put_membuf_str (&mb, escaped);
-      xfree (escaped);
-    }
-
-  put_membuf (&mb, "", 1);
-  *r_encoded = get_membuf (&mb, NULL);
-  if (!*r_encoded)
-    return gpg_error_from_syserror ();
-  return 0;
-}
 
 
 /* Perform a call to stripe.com.  KEYSTRING is the secret key, METHOD

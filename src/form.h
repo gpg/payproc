@@ -1,4 +1,4 @@
-/* stripe.h - Definitions to access the stripe.com service
+/* form.h - Form handling functions
  * Copyright (C) 2014 g10 Code GmbH
  *
  * This file is part of Payproc.
@@ -17,11 +17,9 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef STRIPE_H
-#define STRIPE_H
+#ifndef FORM_H
+#define FORM_H
 
-gpg_error_t stripe_create_card_token (keyvalue_t *dict);
-gpg_error_t stripe_charge_card (keyvalue_t *dict);
+gpg_error_t encode_formdata (keyvalue_t form, char **r_encoded);
 
-
-#endif /*STRIPE_H*/
+#endif /*FORM_H*/

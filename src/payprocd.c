@@ -77,6 +77,7 @@ enum opt_values
     oNoDetach,
     oJournal,
     oStripeKey,
+    oPaypalKey,
     oLive,
 
     oLast
@@ -95,6 +96,8 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_s_s (oJournal,  "journal",   "|FILE|write the journal to FILE"),
   ARGPARSE_s_s (oStripeKey,
                 "stripe-key", "|FILE|read key for Stripe account from FILE"),
+  ARGPARSE_s_s (oPaypalKey,
+                "paypal-key", "|FILE|read key for PayPal account from FILE"),
   ARGPARSE_s_n (oLive, "live",  "enable live mode"),
 
   ARGPARSE_end ()
@@ -135,7 +138,7 @@ my_strusage( int level )
 
 /* Set the Stripe secret key from file FNAME.  */
 static void
-set_stripe_key (const char *fname)
+set_account_key (const char *fname, int service)
 {
   FILE *fp;
   char buf[128];
@@ -148,7 +151,7 @@ set_stripe_key (const char *fname)
       if (!fgets (buf, sizeof buf, fp))
         log_error ("error reading key from '%s': %s\n",
                    fname, strerror (errno));
-      else
+      else if (service == 1)
         {
           trim_spaces (buf);
           if (strncmp (buf, "sk_test_", 8) && strncmp (buf, "sk_live_", 8))
@@ -158,6 +161,18 @@ set_stripe_key (const char *fname)
             {
               xfree (opt.stripe_secret_key);
               opt.stripe_secret_key = xstrdup (buf);
+            }
+        }
+      else if (service == 2)
+        {
+          trim_spaces (buf);
+          if (!strchr (buf, ':') && strlen (buf) != 121)
+            log_error ("file '%s' seems not to carry a PayPal secret key\n",
+                       fname);
+          else
+            {
+              xfree (opt.paypal_secret_key);
+              opt.paypal_secret_key = xstrdup (buf);
             }
         }
       fclose (fp);
@@ -244,7 +259,8 @@ main (int argc, char **argv)
         case oJournal:  jrnl_set_file (pargs.r.ret_str); break;
         case oAllowUID: /*FIXME*/ break;
         case oAllowGID: /*FIXME*/ break;
-        case oStripeKey: set_stripe_key (pargs.r.ret_str); break;
+        case oStripeKey: set_account_key (pargs.r.ret_str, 1); break;
+        case oPaypalKey: set_account_key (pargs.r.ret_str, 2); break;
         case oLive: opt.livemode = 1; break;
 
         default: pargs.err = ARGPARSE_PRINT_ERROR; break;

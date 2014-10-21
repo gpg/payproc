@@ -20,6 +20,11 @@
 #ifndef PAYPAL_H
 #define PAYPAL_H
 
+/*-- paypal.c --*/
+gpg_error_t paypal_checkout_prepare (keyvalue_t *dict);
+gpg_error_t paypal_checkout_execute (keyvalue_t *dict);
+
+
 /*-- paypal-ipn.c --*/
 void paypal_proc_ipn (keyvalue_t *dict);
 

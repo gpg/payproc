@@ -485,6 +485,7 @@ cmd_session (conn_t conn, char *args)
   keyvalue_t kv;
   char *options;
   char *sessid = NULL;
+  char *aliasid = NULL;
   char *errdesc;
 
   if ((options = has_leading_keyword (args, "create")))
@@ -544,6 +545,9 @@ cmd_session (conn_t conn, char *args)
                 "#   get SESSID\n"
                 "#   put SESSID\n"
                 "#   destroy SESSID\n"
+                "#   alias SESSID\n"
+                "#   dealias ALIASID\n"
+                "#   sessid ALIASID\n"
                 , conn->stream);
       return 0;
     }
@@ -744,7 +748,7 @@ cmd_chargecard (conn_t conn, char *args)
   err = keyvalue_put (&conn->dataitems, "Amount", buf);
   if (err)
     goto leave;
-  jrnl_store_charge_record (&conn->dataitems);
+  jrnl_store_charge_record (&conn->dataitems, 1);
 
  leave:
   if (err)
@@ -765,6 +769,162 @@ cmd_chargecard (conn_t conn, char *args)
     write_data_line (keyvalue_find (conn->dataitems, "_timestamp"),
                      conn->stream);
   es_free (buf);
+  return err;
+}
+
+
+
+/* The PPCHECKOUT does a PayPal transaction.  Depending on the
+   sub-command different data items are required.
+
+   The following sub-commands are available:
+
+   prepare
+
+     Start a checkout operation.  In this mode the data is collected,
+     and access code fetched from paypal and a redirect URL returned
+     to the caller.  Required data:
+
+     Amount:     The amount to charge with optional decimal fraction.
+     Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+     Desc:       Optional description of the charge.
+     Meta[NAME]: Meta data further described by NAME.  This is used
+                 to convey application specific data to the log file.
+     Return-Url: URL to which Paypal redirects.
+     Cancel-Url: URL to which Paypal redirects on cancel.
+     Session-Id: Id of the session to be used for storing state.  If this
+                 is not given a new session will be created.
+     Paypal-Xp:  An optional Paypa Experience Id.
+
+     On success these items are returned:
+
+     _SESSID:    If Session-Id was not supplied the id of a new session
+                 is returned.
+     Redirect-Url: The caller must be redirected to this URL for further
+                   processing.
+
+   execute
+
+     Finish a Paypal checkout operation.  Required data:
+
+     Alias-Id:     The alias id used to access the state from the
+                   prepare command.  This should be retrieved from the
+                   Return-Url's "aliasid" parameter which has been
+                   appended to the Return-Url by the prepare sub-command.
+     Paypal-Payer: Returned by Paypal via the
+                   Return-Url's "PayerID" parameter.
+
+     On success these items are returned:
+
+     Charge-Id:  The ID describing this charge
+     Live:       Set to 'f' in test mode or 't' in live mode.
+     Currency:   The currency of the charge.
+     Amount:     The charged amount with optional decimal fraction.
+     Email:      The mail address as told by Paypal.
+     _timestamp: The timestamp as written to the journal
+
+ */
+static gpg_error_t
+cmd_ppcheckout (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  char *options;
+  int decdigs;
+  char *newsessid = NULL;
+  keyvalue_t dict = conn->dataitems;
+  keyvalue_t kv;
+  const char *s;
+  int execmode = 0;
+
+  if ((options = has_leading_keyword (args, "prepare")))
+    {
+      /* Get currency and amount.  */
+      s = keyvalue_get_string (dict, "Currency");
+      if (!valid_currency_p (s, &decdigs))
+        {
+          set_error (MISSING_VALUE, "Currency missing or not supported");
+          goto leave;
+        }
+
+      s = keyvalue_get_string (dict, "Amount");
+      if (!*s || !convert_amount (s, decdigs))
+        {
+          set_error (MISSING_VALUE, "Amount missing or invalid");
+          goto leave;
+        }
+
+      /* Create a session if no session-id has been supplied.  */
+      s = keyvalue_get_string (dict, "Session-Id");
+      if (!*s)
+        {
+          err = session_create (0, NULL, &newsessid);
+          if (err)
+            goto leave;
+          err = keyvalue_put (&conn->dataitems, "Session-Id", newsessid);
+          if (err)
+            goto leave;
+          dict = conn->dataitems;
+        }
+
+      /* Let's ask Paypal to process it.  */
+      err = paypal_checkout_prepare (&conn->dataitems);
+      if (err)
+        goto leave;
+      dict = conn->dataitems;
+    }
+  else if ((options = has_leading_keyword (args, "execute")))
+    {
+      execmode = 1;
+
+      err = paypal_checkout_execute (&conn->dataitems);
+      if (err)
+        goto leave;
+      dict = conn->dataitems;
+      jrnl_store_charge_record (&conn->dataitems, 2);
+      dict = conn->dataitems;
+    }
+  else
+    {
+      es_fputs ("ERR 1 (Unknown sub-command)\n"
+                "# Supported sub-commands are:\n"
+                "#   prepare\n"
+                "#   execute\n"
+                , conn->stream);
+      return 0;
+    }
+
+ leave:
+  if (err)
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
+  else
+    {
+      es_fprintf (conn->stream, "OK\n");
+    }
+
+  for (kv = conn->dataitems; kv; kv = kv->next)
+    if ((!execmode && !strcmp (kv->name, "Redirect-Url"))
+        || (execmode && (!strcmp (kv->name, "Charge-Id")
+                          || !strcmp (kv->name, "Live")
+                          || !strcmp (kv->name, "Email")
+                          || !strcmp (kv->name, "Currency")
+                          || !strcmp (kv->name, "Amount"))))
+      write_data_line (kv, conn->stream);
+
+  if (!err)
+    {
+      if (newsessid)
+        es_fprintf (conn->stream, "_SESSID: %s\n", newsessid);
+      write_data_line (keyvalue_find (conn->dataitems, "_timestamp"),
+                       conn->stream);
+    }
+  xfree (newsessid);
   return err;
 }
 
@@ -875,6 +1035,13 @@ cmd_getinfo (conn_t conn, char *args)
     {
       es_fprintf (conn->stream, "OK %u\n", (unsigned int)getpid());
     }
+  else if (has_leading_keyword (args, "live"))
+    {
+      if (opt.livemode)
+        es_fprintf (conn->stream, "OK\n");
+      else
+        es_fprintf (conn->stream, "ERR 179 (running in test mode)\n");
+    }
   else
     {
       es_fputs ("ERR 1 (Unknown sub-command)\n"
@@ -882,6 +1049,7 @@ cmd_getinfo (conn_t conn, char *args)
                 "#   list-currencies    List supported currencies\n"
                 "#   version            Show the version of this daemon\n"
                 "#   pid                Show the pid of this process\n"
+                "#   live               Returns OK if in live mode\n"
                 , conn->stream);
     }
 
@@ -935,6 +1103,8 @@ connection_handler (conn_t conn)
     err = cmd_cardtoken (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "CHARGECARD")))
     err = cmd_chargecard (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "PPCHECKOUT")))
+    err = cmd_ppcheckout (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "CHECKAMOUNT")))
     err = cmd_checkamount (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "PPIPNHD")))

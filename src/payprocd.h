@@ -29,6 +29,7 @@ struct
 
   int livemode;  /* Expect to be in live mode.  Default is test mode.  */
   char *stripe_secret_key;  /* The secret key for stripe.com */
+  char *paypal_secret_key;  /* The secret key for PayPal */
 
 } opt;
 

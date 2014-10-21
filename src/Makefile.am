@@ -45,6 +45,7 @@ libcommonpth_a_SOURCES = $(common_sources)
 libcommonpth_a_CFLAGS = $(AM_CFLAGS) $(LIBGPG_ERROR_CFLAGS)
 
 utility_sources = \
+	form.c form.h \
 	http.c http.h \
 	cJSON.c cJSON.h
 
@@ -53,7 +54,7 @@ payprocd_SOURCES = \
 	connection.c connection.h \
 	currency.c currency.h \
 	stripe.c stripe.h \
-	paypal-ipn.c paypal.h \
+	paypal.c paypal-ipn.c paypal.h \
 	tlssupport.c tlssupport.h \
 	cred.c cred.h \
 	journal.c journal.h \
@@ -93,7 +94,7 @@ t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
 
-t_connection_SOURCES = t-connection.c stripe.c paypal-ipn.c \
+t_connection_SOURCES = t-connection.c stripe.c paypal.c paypal-ipn.c \
                        journal.c session.c currency.c $(t_common_sources)
 t_connection_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS)
 t_connection_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS)
