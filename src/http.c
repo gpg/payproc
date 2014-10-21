@@ -472,6 +472,28 @@ make_header_line (const char *prefix, const char *suffix,
 }
 
 
+/*
+ * Helper function to create an HTTP header with ascii data.  A
+ * new buffer is returned.  This buffer is the concatenation of the
+ * string PREFIX, the hex-encoded DATA of length LEN and the string
+ * SUFFIX.  On error NULL is returned and ERRNO set.
+ */
+static char *
+make_simple_header_line (const char *prefix, const char *suffix,
+                         const void *data, size_t len )
+{
+  const unsigned char *s = data;
+  char *buffer, *p;
+
+  buffer = xtrymalloc (strlen (prefix) + len + strlen (suffix) + 1);
+  if (!buffer)
+    return NULL;
+  p = stpcpy (buffer, prefix);
+  memcpy (p, s, len);
+  strcpy (p+len, suffix);
+  return buffer;
+}
+
 
 
 /* Register a non-standard global TLS callback function.  If no
@@ -1444,6 +1466,7 @@ send_request (http_t hd, const char *httphost, const char *auth,
       if (uri->auth)
         {
           remove_escapes (uri->auth);
+
           proxy_authstr = make_header_line ("Proxy-Authorization: Basic ",
                                             "\r\n",
                                             uri->auth, strlen(uri->auth));
@@ -1546,8 +1569,12 @@ send_request (http_t hd, const char *httphost, const char *auth,
           myauth = hd->uri->auth;
         }
 
-      authstr = make_header_line ("Authorization: Basic ", "\r\n",
-                                  myauth, strlen (myauth));
+      if ((hd->flags & HTTP_FLAG_AUTH_BEARER))
+        authstr = make_simple_header_line ("Authorization: Bearer ", "\r\n",
+                                           myauth, strlen (myauth));
+      else
+        authstr = make_header_line ("Authorization: Basic ", "\r\n",
+                                           myauth, strlen (myauth));
       if (auth)
         xfree (myauth);
 

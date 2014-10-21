@@ -81,7 +81,8 @@ enum
     HTTP_FLAG_FORCE_TLS = 16,    /* Force the use opf TLS.  */
     HTTP_FLAG_IGNORE_CL = 32,    /* Ignore content-length.  */
     HTTP_FLAG_IGNORE_IPv4 = 64,  /* Do not use IPv4.  */
-    HTTP_FLAG_IGNORE_IPv6 = 128  /* Do not use IPv6.  */
+    HTTP_FLAG_IGNORE_IPv6 = 128, /* Do not use IPv6.  */
+    HTTP_FLAG_AUTH_BEARER = 512  /* Use Bearer authtype instead of Basic.  */
   };
 
 
