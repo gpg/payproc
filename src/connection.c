@@ -457,6 +457,26 @@ reconvert_amount (int cents, int decdigits)
      Store or update the given data in the session.  Deleting an item
      from the session dictionary is possible by putting an empty
      string for it.
+
+   alias SESSID
+
+     Create an alias for the session.
+
+     On success the returned data has an "_ALIASID" item which is to
+     be used for all further alias related requests.
+
+   dealias ALIASID
+
+     Destroy the given ALIAS.
+
+     This does not destroy the session.
+
+   sessid ALIASID
+
+     Return the session id for an alias.
+
+     On success the returned data has an "_SESSID" item.
+
  */
 static gpg_error_t
 cmd_session (conn_t conn, char *args)
@@ -498,6 +518,24 @@ cmd_session (conn_t conn, char *args)
       keyvalue_release (conn->dataitems);
       conn->dataitems = NULL;
     }
+  else if ((options = has_leading_keyword (args, "alias")))
+    {
+      err = session_create_alias (options, &aliasid);
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+    }
+  else if ((options = has_leading_keyword (args, "dealias")))
+    {
+      err = session_destroy_alias (options);
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+    }
+  else if ((options = has_leading_keyword (args, "sessid")))
+    {
+      keyvalue_release (conn->dataitems);
+      conn->dataitems = NULL;
+      err = session_get_sessid (options, &sessid);
+    }
   else
     {
       es_fputs ("ERR 1 (Unknown sub-command)\n"
@@ -513,13 +551,13 @@ cmd_session (conn_t conn, char *args)
   switch (gpg_err_code (err))
     {
     case GPG_ERR_LIMIT_REACHED:
-      errdesc = "Too many active sessions";
+      errdesc = "Too many active sessions or too many aliases for a session";
       break;
     case GPG_ERR_NOT_FOUND:
-      errdesc = "No such session or session timed out";
+      errdesc = "No such session or alias or session timed out";
       break;
     case GPG_ERR_INV_NAME:
-      errdesc = "Invalid session id";
+      errdesc = "Invalid session or alias id";
       break;
     default: errdesc = NULL;
     }
@@ -532,11 +570,14 @@ cmd_session (conn_t conn, char *args)
       es_fprintf (conn->stream, "OK\n");
       if (sessid)
         es_fprintf (conn->stream, "_SESSID: %s\n", sessid);
+      if (aliasid)
+        es_fprintf (conn->stream, "_ALIASID: %s\n", aliasid);
       for (kv = conn->dataitems; kv; kv = kv->next)
         if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
           write_data_line (kv, conn->stream);
     }
   xfree (sessid);
+  xfree (aliasid);
   return err;
 }
 

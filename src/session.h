@@ -29,6 +29,9 @@ gpg_error_t session_create (int ttl, keyvalue_t data, char **r_sessid);
 gpg_error_t session_destroy (const char *sessid);
 gpg_error_t session_put (const char *sessid, keyvalue_t dict);
 gpg_error_t session_get (const char *sessid, keyvalue_t *dictp);
+gpg_error_t session_create_alias (const char *sessid, char **r_aliasid);
+gpg_error_t session_destroy_alias (const char *aliasid);
+gpg_error_t session_get_sessid (const char *aliasid, char **r_sessid);
 
 
 #endif /*SESSION_H*/

@@ -47,11 +47,18 @@
    used for the data. */
 #define MAX_SESSIONS   65536
 
+/* The number of aliases we may store for one session.  */
+#define MAX_ALIASES_PER_SESSION   3
+
 /* We use 20 bytes for the session id.  Using the ZB32 encoder this
    results in a 32 byte ascii string.  To avoid decoding of the
    session string we store the ascii string .  */
 #define SESSID_RAW_LENGTH 20
 #define SESSID_LENGTH 32
+
+
+struct session_alias_s;
+typedef struct session_alias_s *session_alias_t;
 
 
 /* The object holding the session data.  */
@@ -65,8 +72,24 @@ struct session_s
 
   keyvalue_t dict; /* The dictionary with the session's data.  */
 
+  /* Back references to alias objects or NULL.  */
+  session_alias_t aliases[MAX_ALIASES_PER_SESSION];
+
   /* The session id as ZB32 encoded string. */
   char sessid[SESSID_LENGTH+1];
+};
+
+
+/* The object holding an alias to a session object.  */
+struct session_alias_s
+{
+  session_alias_t next;  /* The next item in the bucket.  */
+
+  /* The reference to the session object.  */
+  session_t sess;
+
+  /* The session alias id as ZB32 encoded string. */
+  char aliasid[SESSID_LENGTH+1];
 };
 
 
@@ -78,13 +101,24 @@ static npth_mutex_t sessions_lock = NPTH_MUTEX_INITIALIZER;
    requires 8k of memory for fast indexing which is not too much.  */
 static session_t sessions[32][32];
 
+/* We store pointers to the alias objects in 1024 buckets, indexed
+   by the first two ZB32 encoded characters of the aslias id.  This
+   requires 8k of memory for fast indexing which is not too much.  */
+static session_alias_t aliases[32][32];
+
 /* Total number of sessions in use.  This counter is used to quickly
    check whether we are allowed to create a new session.  */
 static unsigned int sessions_in_use;
 
-/* Because the session objects have a fixed size, it is easy to reuse
-   them.  */
+/* Because the session and alias objects have a fixed size, it is easy
+   to reuse them.  */
 static session_t unused_sessions;
+static session_alias_t unused_aliases;
+
+
+/*  Local prototypes  */
+static gpg_error_t do_destroy_alias (const char *aliasid,
+                                     session_alias_t alias);
 
 
 
@@ -141,7 +175,7 @@ session_housekeeping (void)
 {
   time_t now = time (NULL);
   session_t prev, sess;
-  int a, b;
+  int i, a, b;
 
   if (lock_sessions ())
     return;
@@ -155,6 +189,15 @@ session_housekeeping (void)
           {
             if (check_ttl (sess, now))
               {
+                /* Remove the aliases.  */
+                for (i=0; i < MAX_ALIASES_PER_SESSION; i++)
+                  if (sess->aliases[i])
+                    {
+                      session_alias_t alias = sess->aliases[i];
+                      sess->aliases[i] = NULL;
+                      do_destroy_alias (NULL, alias);
+                    }
+
                 /* Remove the item from the hash table.  */
                 if (prev)
                   prev->next = sess->next;
@@ -195,6 +238,7 @@ session_create (int ttl, keyvalue_t dict, char **r_sessid)
   char nonce[SESSID_RAW_LENGTH];
   keyvalue_t kv;
   char *p;
+  int i;
   int a, b;
 
   *r_sessid = NULL;
@@ -243,8 +287,13 @@ session_create (int ttl, keyvalue_t dict, char **r_sessid)
 
   sess->created = sess->accessed = time (NULL);
   sess->ttl = ttl > 0? ttl : DEFAULT_TTL;
-  sess->dict = NULL;  /* Just to be safe.  */
 
+  /* Just to be safe clear the other fields.  */
+  sess->dict = NULL;
+  for (i=0; i < MAX_ALIASES_PER_SESSION; i++)
+    sess->aliases[i] = NULL;
+
+  /* Init the dictionary.  */
   for (kv = dict; kv; kv = kv->next)
     if (*kv->name)
       {
@@ -295,7 +344,7 @@ session_do_destroy (const char *sessid, int with_lock)
 {
   gpg_error_t err;
   session_t prev, sess;
-  int a, b;
+  int i, a, b;
 
   if (strlen (sessid) != SESSID_LENGTH
       || (a = zb32_index (sessid[0])) < 0
@@ -320,6 +369,17 @@ session_do_destroy (const char *sessid, int with_lock)
       goto leave;
     }
 
+  /* Remove the aliases.  */
+  for (i=0; i < MAX_ALIASES_PER_SESSION; i++)
+    if (sess->aliases[i])
+      {
+        session_alias_t alias = sess->aliases[i];
+        sess->aliases[i] = NULL;
+        err = do_destroy_alias (NULL, alias);
+        if (err)
+          goto leave;
+      }
+
   /* Remove the item from the hash table.  */
   if (prev)
     prev->next = sess->next;
@@ -327,7 +387,7 @@ session_do_destroy (const char *sessid, int with_lock)
     sessions[a][b] = sess->next;
   sessions_in_use--;
 
-  /* Remove the data.  */
+  /* Remove the data. */
   keyvalue_release (sess->dict);
   sess->dict = NULL;
 
@@ -351,17 +411,19 @@ session_destroy (const char *sessid)
 
 
 
-/* Update the data for session SESSID using the dictionary DICT.  If
-   the value of a dictionary entry is the empty string, that entry is
-   removed from the session. */
-gpg_error_t
-session_put (const char *sessid, keyvalue_t dict)
+/* Store the session object for session SESSID at R_SESS.  On success
+   the sessions are locked and the caller must unlock it.  The TTL has
+   also been checked.  On failure NULL is stored at R_SESS and and
+   error code is returned; the sessions are not locked in this case.  */
+static gpg_error_t
+get_session_object (const char *sessid, session_t *r_sess)
 {
   gpg_error_t err;
   time_t now;
   session_t sess;
-  keyvalue_t kv;
   int a, b;
+
+  *r_sess = NULL;
 
   if (strlen (sessid) != SESSID_LENGTH
       || (a = zb32_index (sessid[0])) < 0
@@ -379,18 +441,268 @@ session_put (const char *sessid, keyvalue_t dict)
       break;
   if (!sess)
     {
-      err = gpg_error (GPG_ERR_NOT_FOUND);
-      goto leave;
+      unlock_sessions ();
+      return gpg_error (GPG_ERR_NOT_FOUND);
     }
 
   now = time (NULL);
   if (check_ttl (sess, now))
     {
       session_do_destroy (sessid, 0);
+      unlock_sessions ();
+      return gpg_error (GPG_ERR_NOT_FOUND);
+    }
+  sess->accessed = now;
+
+  *r_sess = sess;
+
+  return 0;
+}
+
+
+
+/* Create an alias for the session SESSID.  On return a malloced
+   string with the alias is stored at R_ALIASID.  Note that only a few
+   aliases may be created per session and that aliases are deleted
+   with the session.  An alias is useful to reference a session to a
+   remote service without given the remove service the ability to take
+   over a session.  Obviously the alias id should only be used if it
+   has been received from that service provider.  */
+gpg_error_t
+session_create_alias (const char *sessid, char **r_aliasid)
+{
+  gpg_error_t err;
+  session_t sess;
+  session_alias_t alias = alias;
+  int malloced = 0;
+  int aidx;
+  char nonce[SESSID_RAW_LENGTH];
+  char *p;
+  int a, b;
+
+  *r_aliasid = NULL;
+
+  err = get_session_object (sessid, &sess);
+  if (err)
+    return err;
+
+  for (aidx=0; aidx < MAX_ALIASES_PER_SESSION; aidx++)
+    if (!sess->aliases[aidx])
+      break;
+  if (!(aidx < MAX_ALIASES_PER_SESSION))
+    {
+      err = gpg_error (GPG_ERR_LIMIT_REACHED);
+      goto leave;
+    }
+
+  if (unused_aliases)
+    {
+      alias = unused_aliases;
+      unused_aliases = alias->next;
+      alias->next = NULL;
+    }
+  else
+    {
+      /* Note that the total number of aliases is bound by the maximum
+         number of sessions.  */
+      alias = xtrycalloc (1, sizeof *alias);
+      if (!alias)
+        {
+          err = gpg_error_from_syserror ();
+          goto leave;
+        }
+      malloced = 1;
+    }
+
+  gcry_create_nonce (nonce, sizeof nonce);
+  p = zb32_encode (nonce, 8*sizeof nonce);
+  if (!p)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  if (strlen (p) != SESSID_LENGTH)
+    BUG ();
+  strcpy (alias->aliasid, p);
+  *r_aliasid = p;
+
+  alias->sess = sess;
+  sess->aliases[aidx] = alias;
+
+  /* Put the alias into the hash table.  */
+  a = zb32_index (alias->aliasid[0]);
+  b = zb32_index (alias->aliasid[1]);
+  if ( a < 0 || a > 31 || b < 0 || b > 32)
+    BUG ();
+  alias->next = aliases[a][b];
+  aliases[a][b] = alias;
+  alias = NULL;
+
+ leave:
+  if (alias)
+    {
+      /* Push an unused session object back or release it.  */
+      if (malloced)
+        xfree (alias);
+      else
+        {
+          alias->sess = NULL;
+          alias->next = unused_aliases;
+          unused_aliases = alias;
+        }
+    }
+  if (err)
+    {
+      xfree (*r_aliasid);
+      *r_aliasid = NULL;
+    }
+  unlock_sessions ();
+  return err;
+}
+
+
+/* Internal version of session_destroy_alias.  This may be called in
+   two modes: If ALIASID is not NULL this destroys the given alias.
+   if ALIAS is not NULL, this alias object is directly destroyed in
+   which case the caller mus have locked the sessions and make sure to
+   remove the reference from the corresponding session object.  */
+static gpg_error_t
+do_destroy_alias (const char *aliasid, session_alias_t alias)
+{
+  gpg_error_t err = 0;
+  int need_lock = !!aliasid;
+  session_alias_t prev;
+  int i;
+  int a, b;
+
+  if (aliasid && alias)
+    BUG ();
+
+  if (alias)
+    {
+      aliasid = alias->aliasid;
+      alias = NULL;
+    }
+
+  if (strlen (aliasid) != SESSID_LENGTH
+      || (a = zb32_index (aliasid[0])) < 0
+      || (b = zb32_index (aliasid[1])) < 0)
+    {
+      return gpg_error (GPG_ERR_INV_NAME);
+    }
+
+  if (need_lock)
+    {
+      err = lock_sessions ();
+      if (err)
+        return err;
+    }
+
+  for (alias=aliases[a][b], prev=NULL; alias; prev=alias, alias=alias->next)
+    if (!strcmp (alias->aliasid, aliasid))
+      break;
+  if (!alias)
+    {
       err = gpg_error (GPG_ERR_NOT_FOUND);
       goto leave;
     }
-  sess->accessed = now;
+
+  /* Remove the item from the hash table.  */
+  if (prev)
+    prev->next = alias->next;
+  else
+    aliases[a][b] = alias->next;
+
+  /* Remove the reference from the session unless we are called with
+     the alias object as input and thus do not have to take the lock.  */
+  if (need_lock)
+    {
+      session_t sess = alias->sess;
+
+      alias->sess = NULL;
+      for (i=0; i < MAX_ALIASES_PER_SESSION; i++)
+        if (sess->aliases[i] == alias)
+          sess->aliases[i] = NULL;
+    }
+
+  /* Shove the item into the attic.  */
+  alias->next = unused_aliases;
+  unused_aliases = alias;
+
+ leave:
+  if (need_lock)
+    unlock_sessions ();
+  return err;
+}
+
+
+/* Destroy the alias ALIASID.  */
+gpg_error_t
+session_destroy_alias (const char *aliasid)
+{
+  return do_destroy_alias (aliasid, NULL);
+}
+
+
+
+/* Return the session id for the given aliasid.  */
+gpg_error_t
+session_get_sessid (const char *aliasid, char **r_sessid)
+{
+  gpg_error_t err = 0;
+  session_alias_t alias;
+  int a, b;
+
+  *r_sessid = NULL;
+
+  if (strlen (aliasid) != SESSID_LENGTH
+      || (a = zb32_index (aliasid[0])) < 0
+      || (b = zb32_index (aliasid[1])) < 0)
+    {
+      return gpg_error (GPG_ERR_INV_NAME);
+    }
+
+  err = lock_sessions ();
+  if (err)
+    return err;
+
+  for (alias=aliases[a][b]; alias; alias=alias->next)
+    if (!strcmp (alias->aliasid, aliasid))
+      break;
+  if (!alias || !alias->sess)
+    {
+      err = gpg_error (GPG_ERR_NOT_FOUND);
+      goto leave;
+    }
+
+  *r_sessid = xtrystrdup (alias->sess->sessid);
+  if (!*r_sessid)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+
+
+ leave:
+  unlock_sessions ();
+  return err;
+}
+
+
+
+/* Update the data for session SESSID using the dictionary DICT.  If
+   the value of a dictionary entry is the empty string, that entry is
+   removed from the session. */
+gpg_error_t
+session_put (const char *sessid, keyvalue_t dict)
+{
+  gpg_error_t err;
+  session_t sess;
+  keyvalue_t kv;
+
+  err = get_session_object (sessid, &sess);
+  if (err)
+    return err;
 
   /* Note: This is not an atomic operation.  If the put fails the
      session dictionary may be only partly updated.  However, the only
@@ -411,46 +723,18 @@ session_put (const char *sessid, keyvalue_t dict)
 }
 
 
-
 /* Update the dictionary at address DICTP with the data from session
    SESSID. */
 gpg_error_t
 session_get (const char *sessid, keyvalue_t *dictp)
 {
   gpg_error_t err;
-  time_t now;
   session_t sess;
   keyvalue_t kv;
-  int a, b;
 
-  if (strlen (sessid) != SESSID_LENGTH
-      || (a = zb32_index (sessid[0])) < 0
-      || (b = zb32_index (sessid[1])) < 0)
-    {
-      return gpg_error (GPG_ERR_INV_NAME);
-    }
-
-  err = lock_sessions ();
+  err = get_session_object (sessid, &sess);
   if (err)
     return err;
-
-  for (sess = sessions[a][b]; sess; sess = sess->next)
-    if (!strcmp (sess->sessid, sessid))
-      break;
-  if (!sess)
-    {
-      err = gpg_error (GPG_ERR_NOT_FOUND);
-      goto leave;
-    }
-
-  now = time (NULL);
-  if (check_ttl (sess, now))
-    {
-      session_do_destroy (sessid, 0);
-      err = gpg_error (GPG_ERR_NOT_FOUND);
-      goto leave;
-    }
-  sess->accessed = now;
 
   for (kv = sess->dict; kv; kv = kv->next)
     if (*kv->name)

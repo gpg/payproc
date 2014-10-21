@@ -151,6 +151,26 @@ The following sub-commands are available:
    from the session dictionary is possible by putting an empty string
    for it.
 
+ - Create an alias for the session.
+
+   : alias SESSID
+
+   On success the returned data has an "_ALIASID" item which is to be
+   used for all further alias related requests.
+
+ - Destroy an alias.
+
+   : dealias ALIASID
+
+   Note that this does not destroy the session.
+
+ - Return the session id for an alias.
+
+   : sessid ALIASID
+
+   On success the returned data has an "_SESSID" item.
+
+
 ** PPIPNHD
 
 This command is used exclusively by the =ppipnhd= CGI to have payprocd

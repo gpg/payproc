@@ -412,7 +412,7 @@ keyvalue_get (keyvalue_t list, const char *key)
 }
 
 
-/* Same as keyvalue_get put return the value as a modifiable string
+/* Same as keyvalue_get but return the value as a modifiable string
    and the value in LIST to NULL.  The caller must xfree the
    result.  */
 char *
