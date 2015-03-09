@@ -78,6 +78,8 @@ enum opt_values
     oStripeKey,
     oPaypalKey,
     oLive,
+    oAdminUID,
+    oAdminGID,
 
     oLast
   };
@@ -92,6 +94,8 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_s_s (oLogFile,  "log-file",  "|FILE|write log output to FILE"),
   ARGPARSE_s_s (oAllowUID, "allow-uid", "|N|allow access from uid N"),
   ARGPARSE_s_s (oAllowGID, "allow-gid", "|N|allow access from gid N"),
+  ARGPARSE_s_s (oAdminUID, "admin-uid", "|N|allow admin access from uid N"),
+  ARGPARSE_s_s (oAdminGID, "admin-gid", "|N|allow admin access from gid N"),
   ARGPARSE_s_s (oJournal,  "journal",   "|FILE|write the journal to FILE"),
   ARGPARSE_s_s (oStripeKey,
                 "stripe-key", "|FILE|read key for Stripe account from FILE"),
@@ -259,6 +263,8 @@ main (int argc, char **argv)
         case oJournal:  jrnl_set_file (pargs.r.ret_str); break;
         case oAllowUID: /*FIXME*/ break;
         case oAllowGID: /*FIXME*/ break;
+        case oAdminUID: /*FIXME*/ break;
+        case oAdminGID: /*FIXME*/ break;
         case oStripeKey: set_account_key (pargs.r.ret_str, 1); break;
         case oPaypalKey: set_account_key (pargs.r.ret_str, 2); break;
         case oLive: opt.livemode = 1; break;
