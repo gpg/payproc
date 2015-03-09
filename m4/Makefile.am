@@ -18,4 +18,4 @@
 
 
 EXTRA_DIST = \
-	 gpg-error.m4 npth.m4 estream.m4
+	 gpg-error.m4 npth.m4 libgcrypt.m4
