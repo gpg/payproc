@@ -1,5 +1,5 @@
-/* connection.c - Handle a conenction.
- * Copyright (C) 2014 g10 Code GmbH
+/* connection.c - Handle a client request.
+ * Copyright (C) 2014, 2015 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -26,7 +26,6 @@
 
 #include "util.h"
 #include "logging.h"
-#include "estream.h"
 #include "payprocd.h"
 #include "stripe.h"
 #include "paypal.h"
@@ -52,7 +51,7 @@ struct conn_s
   unsigned int idno;     /* Connection id for logging.  */
   int fd;                /* File descriptor for this connection.  */
   estream_t stream;      /* The corresponding stream object.  */
-                         /* N.B. The stream object mayl only be used
+                         /* N.B. The stream object may only be used
                             by the connection thread.  */
   char *command;         /* The command line (malloced). */
   keyvalue_t dataitems;  /* The data items.  */
@@ -402,7 +401,7 @@ convert_amount (const char *string, int decdigits)
 
 /* Return a string with the amount computed from CENTS.  DECDIGITS
    gives the number of post decimal positions in CENTS.  Return NULL
-   on error.  */
+   on error.  es_free must be used to release the return value. */
 static char *
 reconvert_amount (int cents, int decdigits)
 {
@@ -410,12 +409,12 @@ reconvert_amount (int cents, int decdigits)
   int i;
 
   if (decdigits <= 0)
-    return es_asprintf ("%d", cents);
+    return es_bsprintf ("%d", cents);
   else
     {
       for (tens=1, i=0; i < decdigits; i++)
         tens *= 10;
-      return es_asprintf ("%d.%0*d", cents / tens, decdigits, cents % tens);
+      return es_bsprintf ("%d.%0*d", cents / tens, decdigits, cents % tens);
     }
 }
 

@@ -31,7 +31,6 @@
 #define GNUPG_COMMON_HTTP_H
 
 #include <gpg-error.h>
-#include "estream.h"
 #include "strlist.h"
 
 struct uri_tuple_s

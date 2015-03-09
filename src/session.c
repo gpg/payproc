@@ -28,7 +28,6 @@
 
 #include "util.h"
 #include "logging.h"
-#include "estream.h"
 #include "payprocd.h"
 #include "session.h"
 

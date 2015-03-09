@@ -26,7 +26,6 @@
 #include "util.h"
 #include "logging.h"
 #include "argparse.h"
-#include "estream.h"
 #include "jrnl-fields.h"
 
 /* Constants to identify the options. */
@@ -191,7 +190,7 @@ main (int argc, char **argv)
   log_set_prefix ("payproc-jrnl", JNLIB_LOG_WITH_PREFIX);
 
   /* Make sure that our subsystems are ready.  */
-  es_init ();
+  gpgrt_init ();
 
   /* Parse the command line. */
   pargs.argc  = &argc;

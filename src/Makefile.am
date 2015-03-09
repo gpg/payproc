@@ -27,8 +27,6 @@ TESTS = $(module_tests)
 
 common_sources = \
 	util.c util.h \
-	estream.c estream.h \
-	estream-printf.c estream-printf.h \
 	libjnlib-config.h \
 	logging.c logging.h \
 	membuf.c membuf.h \

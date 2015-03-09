@@ -1,5 +1,5 @@
 # configure.ac - for Payproc
-# Copyright (C) 2014 g10 Code GmbH
+# Copyright (C) 2014, 2015 g10 Code GmbH
 #
 # This file is part of Payproc.
 #
@@ -42,7 +42,7 @@ m4_define([mym4_full_version],[mym4_version[]mym4_betastring])
 
 AC_INIT([payproc],[mym4_full_version], [http://bugs.gnupg.org])
 
-NEED_GPG_ERROR_VERSION=1.10
+NEED_GPG_ERROR_VERSION=1.18
 
 NEED_LIBASSUAN_API=2
 NEED_LIBASSUAN_VERSION=2.1.0
@@ -90,6 +90,13 @@ AH_TOP([
 # Stuff which goes at the bottom of config.h.
 #
 AH_BOTTOM([
+
+/* Provide the es_ macro for estream.  */
+#define GPGRT_ENABLE_ES_MACROS 1
+
+/* Tell Libgcrypt not to include deprecated definitions.  */
+#define GCRYPT_NO_DEPRECATED 1
+
 
 #endif /*GNUPG_CONFIG_H_INCLUDED*/
 ])
@@ -349,14 +356,6 @@ if test "$GCC" = yes; then
     if test x"$_gcc_psign" = xyes ; then
        CFLAGS="$CFLAGS -Wpointer-arith"
     fi
-
-    # The undocumented option -Wno-psabi suppresses the annoying
-    #   "the ABI of passing union with long double has changed in GCC 4.4"
-    # which is emitted in estream-printf.c but entirely irrelvant
-    # because that union is local to the file.
-    if test x"$_gcc_silent_wno" = xyes ; then
-       CFLAGS="$CFLAGS -Wno-psabi"
-    fi
 fi
 
 
@@ -370,12 +369,6 @@ AC_ARG_ENABLE(optimization,
                   [if test $enableval = no ; then
                       CFLAGS=`echo $CFLAGS | sed s/-O[[1-9]]\ /-O0\ /g`
                    fi])
-
-#
-# Prepare building of estream
-#
-estream_INIT
-
 
 #
 # Print errors here so that they are visible all

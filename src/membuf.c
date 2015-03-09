@@ -36,7 +36,6 @@
 
 
 #include "util.h"
-#include "estream-printf.h"
 #include "membuf.h"
 
 
@@ -131,7 +130,7 @@ put_membuf_printf (membuf_t *mb, const char *format, ...)
   char *buf;
 
   va_start (arg_ptr, format);
-  rc = estream_vasprintf (&buf, format, arg_ptr);
+  rc = es_vasprintf (&buf, format, arg_ptr);
   if (rc < 0)
     mb->out_of_core = errno ? errno : ENOMEM;
   va_end (arg_ptr);

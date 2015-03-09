@@ -32,9 +32,8 @@
 /* Simple HTTP client implementation.  We try to keep the code as
    self-contained as possible.  There are some contraints however:
 
-  - estream is required.  We now require estream because it provides a
-    very useful and portable asprintf implementation and the fopencookie
-    function.
+  - libgpg-error 1.18 is required because that includes the estream
+    functions.
   - stpcpy is required
   - fixme: list other requirements.
 
@@ -1592,7 +1591,7 @@ send_request (http_t hd, const char *httphost, const char *auth,
 
   if (http_proxy && *http_proxy)
     {
-      request = es_asprintf
+      request = gpgrt_bsprintf
         ("%s %s://%s:%hu%s%s HTTP/1.0\r\n%s%s",
          hd->req_type == HTTP_REQ_GET ? "GET" :
          hd->req_type == HTTP_REQ_HEAD ? "HEAD" :
@@ -1612,7 +1611,7 @@ send_request (http_t hd, const char *httphost, const char *auth,
       else
         snprintf (portstr, sizeof portstr, ":%u", port);
 
-      request = es_asprintf
+      request = es_bsprintf
         ("%s %s%s HTTP/1.0\r\nHost: %s%s\r\n%s",
          hd->req_type == HTTP_REQ_GET ? "GET" :
          hd->req_type == HTTP_REQ_HEAD ? "HEAD" :

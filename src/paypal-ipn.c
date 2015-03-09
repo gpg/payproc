@@ -25,7 +25,6 @@
 
 #include "util.h"
 #include "logging.h"
-#include "estream.h"
 #include "http.h"
 #include "membuf.h"
 #include "payprocd.h"

@@ -38,6 +38,7 @@
    |    |          | $ := system record                             |
    |    |          | C := credit card charge                        |
    |    |          | R := credit card refund                        |
+   |    |          | M := manual added payment                      |
    |  3 | live     | 1 if this is not a test account                |
    |  4 | currency | 3 letter ISO code for the currency (lowercase) |
    |  5 | amount   | Amount with decimal point                      |
@@ -45,7 +46,8 @@
    |  7 | mail     | Email address                                  |
    |  8 | meta     | Structured field with additional data          |
    |  9 | last4    | The last 4 digits of the card                  |
-   | 10 | service  | Payment service (0=n/a, 1=stripe.com, 2=PayPal)|
+   | 10 | service  | Payment service (0=n/a, 1=stripe.com,2=PayPal, |
+   |    |          | 3=SEPA, 255=user)                              |
    | 11 | account  | Account number                                 |
    | 12 | chargeid | Charge id                                      |
    | 13 | txid     | Transaction id                                 |
@@ -74,7 +76,6 @@
 
 #include "util.h"
 #include "logging.h"
-#include "estream.h"
 #include "payprocd.h"
 #include "http.h"
 #include "currency.h"

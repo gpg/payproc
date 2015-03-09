@@ -26,7 +26,6 @@
 
 #include "util.h"
 #include "logging.h"
-#include "estream.h"
 #include "http.h"
 #include "membuf.h"
 #include "cJSON.h"
@@ -440,7 +439,7 @@ paypal_checkout_prepare (keyvalue_t *dict)
   if (*s)
     desc = xtrystrdup (s);
   else
-    desc = es_asprintf ("Payment of %s %s", amount, currency);
+    desc = es_bsprintf ("Payment of %s %s", amount, currency);
   if (!desc)
     {
       err = gpg_error_from_syserror ();
@@ -460,7 +459,7 @@ paypal_checkout_prepare (keyvalue_t *dict)
 
   s = keyvalue_get_string (*dict, "Paypal-Xp");
   if (*s && !strchr (s, '\"'))
-    paypal_xp_snippet = es_asprintf ("  \"experience_profile_id\": \"%s\",", s);
+    paypal_xp_snippet = es_bsprintf ("  \"experience_profile_id\": \"%s\",", s);
 
 
   /* Create an alias for the session.  */
@@ -518,7 +517,7 @@ paypal_checkout_prepare (keyvalue_t *dict)
   json = NULL;
 
   /* Prepare the payment.  */
-  request = es_asprintf ("{ \"transactions\": [{"
+  request = es_bsprintf ("{ \"transactions\": [{"
                          "    \"amount\": {"
                          "      \"currency\":\"%s\","
                          "         \"total\":\"%s\""
@@ -689,13 +688,13 @@ paypal_checkout_execute (keyvalue_t *dict)
     goto leave;
 
   /* Execute the payment.  */
-  request = es_asprintf ("{ \"payer_id\": \"%s\" }", paypal_payer);
+  request = es_bsprintf ("{ \"payer_id\": \"%s\" }", paypal_payer);
   if (!request)
     {
       err = gpg_error_from_syserror ();
       goto leave;
     }
-  method = es_asprintf ("payments/payment/%s/execute", paypal_id);
+  method = es_bsprintf ("payments/payment/%s/execute", paypal_id);
   if (!request)
     {
       err = gpg_error_from_syserror ();

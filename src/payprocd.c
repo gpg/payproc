@@ -35,7 +35,6 @@
 #include "util.h"
 #include "logging.h"
 #include "argparse.h"
-#include "estream.h"
 #include "connection.h"
 #include "tlssupport.h"
 #include "cred.h"
@@ -209,7 +208,8 @@ main (int argc, char **argv)
   log_set_prefix ("payprocd", JNLIB_LOG_WITH_PREFIX);
 
   /* Make sure that our subsystems are ready.  */
-  es_init ();
+  gpgrt_init ();
+  gpgrt_set_syscall_clamp (npth_unprotect, npth_protect);
   /* Access the standard estreams as early as possible.  If we don't
      do this the original stdio streams may have been closed when
      _es_get_std_stream is first use and in turn it would connect to
@@ -217,7 +217,7 @@ main (int argc, char **argv)
   {
     int i;
     for (i=0; i < 3; i++)
-      (void)_es_get_std_stream (i);
+      (void)_gpgrt_get_std_stream (i);
   }
 
   npth_init ();

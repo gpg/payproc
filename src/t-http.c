@@ -120,7 +120,7 @@ main (int argc, char **argv)
   int c;
   http_session_t session = NULL;
 
-  es_init ();
+  gpgrt_init ();
   log_set_prefix ("t-http", 1 | 4);
   if (argc != 2)
     {

@@ -30,7 +30,6 @@
 #include <ctype.h>
 
 #include "util.h"
-#include "estream.h"
 
 /* The error source number for Payproc.  */
 gpg_err_source_t default_errsource;
@@ -376,7 +375,7 @@ keyvalue_putf (keyvalue_t *list, const char *key, const char *format, ...)
     return gpg_error (GPG_ERR_INV_VALUE);
 
   va_start (arg_ptr, format);
-  value = es_vasprintf (format, arg_ptr);
+  value = gpgrt_vbsprintf (format, arg_ptr);
   va_end (arg_ptr);
   if (!value)
     return gpg_error_from_syserror ();

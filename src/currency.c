@@ -26,8 +26,6 @@
 
 #include "payprocd.h"
 #include "util.h"
-#include "estream.h"
-#include "estream-printf.h"
 #include "logging.h"
 #include "journal.h"
 #include "currency.h"
@@ -243,10 +241,10 @@ convert_currency (char *buffer, size_t bufsize,
   if (rate != 1.0)
     {
       value /= rate;
-      value += 0.005; /* So that snprintf round tyhe value. */
+      value += 0.005; /* So that snprintf rounds the value. */
     }
 
-  if (estream_snprintf (buffer, bufsize, "%.2f", value) < 0)
+  if (gpgrt_snprintf (buffer, bufsize, "%.2f", value) < 0)
     {
       log_error ("error converting %s %s to Euro: %s\n",
                  amount, currency, strerror (errno));
