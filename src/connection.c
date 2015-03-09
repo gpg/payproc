@@ -32,6 +32,7 @@
 #include "journal.h"
 #include "session.h"
 #include "currency.h"
+#include "preorder.h"
 #include "connection.h"
 
 /* Maximum length of an input line.  */
@@ -929,6 +930,99 @@ cmd_ppcheckout (conn_t conn, char *args)
 
 
 
+/* The SEPAPREORDER command adds a preorder record for a SEPA payment
+   into the preorder database.  The following values are expected in
+   the dataitems:
+
+   Amount:     The amount to charge with optional decimal fraction.
+   Currency:   If given its value must be EUR.
+   Desc:       Optional description of the charge.
+   Email:      Optional contact mail address of the customer
+   Meta[NAME]: Meta data further described by NAME.  This is used to convey
+               application specific data to the log file.
+
+   On success these items are returned:
+
+   SEPA-Ref:   A string to be returned to the caller.
+   Amount:     The reformatted amount
+   Currency:   The value "EUR"
+   _timestamp: The timestamp as written to the preorder db.
+
+ */
+static gpg_error_t
+cmd_sepapreorder (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  keyvalue_t dict = conn->dataitems;
+  keyvalue_t kv;
+  const char *s;
+  unsigned int cents;
+  char *buf = NULL;
+
+  (void)args;
+
+  /* Get currency and amount.  */
+  s = keyvalue_get (dict, "Currency");
+  if (!s)
+    {
+      err = keyvalue_put (&conn->dataitems, "Currency", "EUR");
+      if (err)
+        goto leave;
+    }
+  else if (strcasecmp (s, "EUR"))
+    {
+      set_error (INV_VALUE, "Currency must be \"EUR\" if given");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Amount");
+  if (!*s || !(cents = convert_amount (s, 2)))
+    {
+      set_error (MISSING_VALUE, "Amount missing or invalid");
+      goto leave;
+    }
+  err = keyvalue_putf (&conn->dataitems, "_amount", "%u", cents);
+  dict = conn->dataitems;
+  if (err)
+    goto leave;
+  buf = reconvert_amount (keyvalue_get_int (conn->dataitems, "_amount"), 2);
+  if (!buf)
+    {
+      err = gpg_error_from_syserror ();
+      conn->errdesc = "error converting _amount";
+      goto leave;
+    }
+  err = keyvalue_put (&conn->dataitems, "Amount", buf);
+  if (err)
+    goto leave;
+
+  /* Note that the next function does not only store the record but
+     also creates the SEPA-Ref value and puts it into dataitems.  This
+     is to make sure SEPA-Ref is a unique key for the preorder db.  */
+  err = preorder_store_record (&conn->dataitems);
+
+ leave:
+  if (err)
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
+  else
+    es_fprintf (conn->stream, "OK\n");
+  for (kv = conn->dataitems; kv; kv = kv->next)
+    if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+      write_data_line (kv, conn->stream);
+
+  es_free (buf);
+  return err;
+}
+
+
+
 /* The CHECKAMOUNT command checks whether a given amount is within the
    configured limits for payment.  It may eventually provide
    additional options.  The following values are expected in the
@@ -1104,6 +1198,8 @@ connection_handler (conn_t conn)
     err = cmd_chargecard (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "PPCHECKOUT")))
     err = cmd_ppcheckout (conn, cmdargs);
+  else if ((cmdargs = has_leading_keyword (conn->command, "SEPAPREORDER")))
+    err = cmd_sepapreorder (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "CHECKAMOUNT")))
     err = cmd_checkamount (conn, cmdargs);
   else if ((cmdargs = has_leading_keyword (conn->command, "PPIPNHD")))

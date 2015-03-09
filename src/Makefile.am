@@ -56,14 +56,15 @@ payprocd_SOURCES = \
 	tlssupport.c tlssupport.h \
 	cred.c cred.h \
 	journal.c journal.h \
+	preorder.c preorder.h \
 	session.c session.h \
 	$(common_headers) \
 	$(utility_sources)
 payprocd_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGCRYPT_CFLAGS) \
-                  $(LIBGNUTLS_CFLAGS)
+                  $(LIBGNUTLS_CFLAGS) $(SQLITE3_CFLAGS)
 payprocd_LDADD = -lm libcommonpth.a \
                   $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGCRYPT_LIBS) \
-                  $(LIBGNUTLS_LIBS)
+                  $(LIBGNUTLS_LIBS) $(SQLITE3_LIBS)
 
 payproc_jrnl_SOURCES = \
         payproc-jrnl.c \
@@ -77,7 +78,7 @@ ppipnhd_SOURCES = ppipnhd.c
 ppipnhd_CFLAGS =
 ppipnhd_LDADD =
 
-module_tests = t-connection
+module_tests = t-connection t-preorder
 
 AM_CFLAGS = $(GPG_ERROR_CFLAGS)
 LDADD  = -lm libcommon.a $(GPG_ERROR_LIBS)
@@ -93,6 +94,11 @@ t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
 
 t_connection_SOURCES = t-connection.c stripe.c paypal.c paypal-ipn.c \
+		       preorder.c \
                        journal.c session.c currency.c $(t_common_sources)
-t_connection_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS)
-t_connection_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS)
+t_connection_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS)
+t_connection_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS)
+
+t_preorder_SOURCES = t-preorder.c $(t_common_sources) journal.c currency.c
+t_preorder_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS)
+t_preorder_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS)

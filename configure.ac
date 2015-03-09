@@ -125,7 +125,6 @@ AC_PROG_INSTALL
 AC_PROG_LN_S
 AC_PROG_RANLIB
 AC_CHECK_TOOL(AR, ar, :)
-AC_CHECK_TOOL(WINDRES, windres, :)
 AC_ISC_POSIX
 AC_SYS_LARGEFILE
 
@@ -184,6 +183,25 @@ else
   AC_MSG_WARN([[
 ***
 *** GNUTLS not found
+***
+*** $tmp]])
+fi
+
+#
+# SQLite
+#
+PKG_CHECK_MODULES([SQLITE3],[sqlite3 >= 3.5],
+                            [have_sqlite3=yes],
+                            [have_sqlite3=no])
+if test "$have_sqlite3" = "yes"; then
+  AC_SUBST([SQLITE3_CFLAGS])
+  AC_SUBST([SQLITE3_LIBS])
+  :
+else
+  tmp=$(echo "$SQLITE3_PKG_ERRORS" | tr '\n' '\v' | sed 's/\v/\n*** /g')
+  AC_MSG_WARN([[
+***
+*** SQLite3 not found
 ***
 *** $tmp]])
 fi
@@ -414,6 +432,13 @@ if test "$have_gnutls" = "no"; then
 **  This library is for example available at
 ***   ftp://ftp.gnutls.org/gcrypt/gnutls/
 *** (at least version $NEED_GNUTLS_VERSION is required.)
+***]])
+fi
+if test "$have_sqlite3" = "no"; then
+   die=yes
+   AC_MSG_NOTICE([[
+***
+*** You need SQLite3 to build this program.
 ***]])
 fi
 

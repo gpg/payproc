@@ -111,6 +111,33 @@ amount converted to an Euro value.  This conversion is done using the
 reference data retrieved via cron job.  It may be different from the
 conversion done by the payment service provider.
 
+** PPCHECKOUT
+
+PayPal Checkout.  See the source for details. FIXME.
+
+** SEPAPREORDER
+
+#+begin_example
+SEPAPREORDER
+Amount: 17.3
+
+OK
+Currency: Eur
+Amount: 17.30
+SEPA-Ref: GYT3L-27
+#+end_example
+
+The error return is similar to CHARGECARD.
+
+This commands adds a preorder record for a SEPA payment into the
+preorder database.  That record will be removed after 30 days if it
+has not been used.  A command line tool can be used to match a
+received payment with this record and create a final log record.  Note
+that a Currency is not required because SEPA does only allow Euro.
+The SEPA-Ref is a short random string used to index that record.  The
+additional number is used to find an entry in the preorder db in case
+of a typos in the first string.
+
 
 ** SESSION
 
