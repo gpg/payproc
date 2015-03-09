@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <ctype.h>
+#include <time.h>
 
 #include "util.h"
 #include "logging.h"
@@ -634,6 +635,39 @@ zb32_encode (const void *data, unsigned int databits)
   /* Need to strip some bytes if not a multiple of 40.  */
   output[(databits + 5 - 1) / 5] = 0;
   return output;
+}
+
+
+
+/* Get the current time and put it into TIMESTAMP, which must be a
+   buffer of at least TIMESTAMP_SIZE bytes.  */
+char *
+get_current_time (char *timestamp)
+{
+  time_t atime = time (NULL);
+  struct tm *tp;
+
+  if (atime == (time_t)(-1))
+    {
+      log_error ("time() failed: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      severe_error ();
+    }
+
+#ifdef HAVE_GMTIME_R
+  {
+    struct tm tmbuf;
+
+    tp = gmtime_r (&atime, &tmbuf);
+  }
+#else
+  tp = gmtime (&atime);
+#endif
+
+  snprintf (timestamp, TIMESTAMP_SIZE, "%04d%02d%02dT%02d%02d%02d",
+            1900 + tp->tm_year, tp->tm_mon+1, tp->tm_mday,
+            tp->tm_hour, tp->tm_min, tp->tm_sec);
+  return timestamp;
 }
 
 

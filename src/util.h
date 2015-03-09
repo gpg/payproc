@@ -101,6 +101,9 @@ extern gpg_err_source_t default_errsource;
 /* The size of a buffer suitable to hold a string with an amount.  */
 #define AMOUNTBUF_SIZE 48
 
+/* The size of our standard timestamp ("YYYYMMDDTHHMMSS").  */
+#define TIMESTAMP_SIZE 16
+
 
 /*-- util.c --*/
 void severe_error (void);
@@ -151,10 +154,11 @@ gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data);
 int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);
 
+char *get_current_time (char *timestamp);
+
 void write_escaped (const char *string, estream_t fp);
 void write_meta_field (keyvalue_t dict, estream_t fp);
 char *meta_field_to_string (keyvalue_t dict);
-
 
 /*-- percent.c --*/
 char *percent_plus_escape (const char *string);

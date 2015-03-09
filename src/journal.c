@@ -81,9 +81,6 @@
 #include "currency.h"
 #include "journal.h"
 
-/* The size of our standard timestamp.  */
-#define TIMESTAMP_SIZE 15
-
 
 /* Info about an open log file.  */
 struct logfile_s
@@ -183,37 +180,6 @@ write_and_close_fp (estream_t fp)
 }
 
 
-/* Get the current time and put it into TIMESTAMP, which must be a
-   buffer of at least TIMESTAMP_SIZE + 1 bytes.  */
-static void
-get_current_time (char *timestamp)
-{
-  time_t atime = time (NULL);
-  struct tm *tp;
-
-  if (atime == (time_t)(-1))
-    {
-      log_error ("time() failed: %s\n",
-                 gpg_strerror (gpg_error_from_syserror()));
-      severe_error ();
-    }
-
-#ifdef HAVE_GMTIME_R
-  {
-    struct tm tmbuf;
-
-    tp = gmtime_r (&atime, &tmbuf);
-  }
-#else
-  tp = gmtime (&atime);
-#endif
-
-  snprintf (timestamp, TIMESTAMP_SIZE+1, "%04d%02d%02dT%02d%02d%02d",
-            1900 + tp->tm_year, tp->tm_mon+1, tp->tm_mday,
-            tp->tm_hour, tp->tm_min, tp->tm_sec);
-}
-
-
 /* Register the journal file.  */
 void
 jrnl_set_file (const char *fname)
@@ -226,7 +192,7 @@ static estream_t
 start_record (char type, char *timestamp)
 {
   estream_t fp;
-  char timestamp_buffer[TIMESTAMP_SIZE + 1];
+  char timestamp_buffer[TIMESTAMP_SIZE];
 
   if (!timestamp)
     timestamp = timestamp_buffer;
@@ -282,7 +248,7 @@ void
 jrnl_store_charge_record (keyvalue_t *dictp, int service)
 {
   estream_t fp;
-  char timestamp[TIMESTAMP_SIZE + 1];
+  char timestamp[TIMESTAMP_SIZE];
   keyvalue_t dict;
   const char *curr, *amnt;
   char amountbuf[AMOUNTBUF_SIZE];
