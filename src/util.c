@@ -1,7 +1,7 @@
 /* util.c - Genereal utility functions.
  * Copyright (C) 1998, 1999, 2000, 2001, 2003, 2004, 2005, 2006, 2007,
  *               2008, 2009, 2010  Free Software Foundation, Inc.
- * Copyright (C) 2014 g10 Code GmbH
+ * Copyright (C) 2014, 2015 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -30,10 +30,21 @@
 #include <ctype.h>
 
 #include "util.h"
+#include "logging.h"
 
 /* The error source number for Payproc.  */
 gpg_err_source_t default_errsource;
 
+
+/* A severe error was encountered.  Stop the process as soon as
+   possible but first give other connections a chance to
+   terminate.  */
+void
+severe_error (void)
+{
+  /* FIXME: stop only this thread and wait for other threads.  */
+  exit (4);
+}
 
 
 static void
@@ -623,4 +634,109 @@ zb32_encode (const void *data, unsigned int databits)
   /* Need to strip some bytes if not a multiple of 40.  */
   output[(databits + 5 - 1) / 5] = 0;
   return output;
+}
+
+
+
+/* Write buffer BUF of length LEN to stream FP.  Escape all characters
+   in a way that the stream can be used for a colon delimited line
+   format including structured URL like fields.  */
+static void
+write_escaped_buf (const void *buf, size_t len, estream_t fp)
+{
+  const unsigned char *s;
+
+  for (s = buf; len; s++, len--)
+    {
+      if (!strchr (":&\n\r", *s))
+        es_putc (*s, fp);
+      else
+        es_fprintf (fp, "%%%02X", *s);
+    }
+}
+
+
+/* Write STRING to stream FP.  Escape all characters in a way that the
+   stream can be used for a colon delimited line format including
+   structured URL like fields.  */
+void
+write_escaped (const char *string, estream_t fp)
+{
+  write_escaped_buf (string, strlen (string), fp);
+}
+
+
+/* Iterate over all keys named "Meta[FOO]" for all FOO and print the
+   meta data field.  */
+void
+write_meta_field (keyvalue_t dict, estream_t fp)
+{
+  keyvalue_t kv;
+  const char *s, *name;
+  int any = 0;
+
+  for (kv=dict; kv; kv = kv->next)
+    {
+      if (!strncmp (kv->name, "Meta[", 5) && kv->value && *kv->value)
+        {
+          name = kv->name + 5;
+          for (s = name; *s; s++)
+            {
+              if (*s == ']')
+                break;
+              else if (strchr ("=& \t", *s))
+                break;
+            }
+          if (*s != ']' || s == name || s[1])
+            continue; /* Not a valid key.  */
+          if (!any)
+            any = 1;
+          else
+            es_putc ('&', fp);
+          write_escaped_buf (name, s - name, fp);
+          es_putc ('=', fp);
+          write_escaped_buf (kv->value, strlen (kv->value), fp);
+        }
+    }
+}
+
+
+/* Create a structured string from the "Meta" field.  On error NULL is
+   return.  The returned string must be released with es_free.  */
+char *
+meta_field_to_string (keyvalue_t dict)
+{
+  estream_t fp;
+  void *buffer;
+  int writefailed;
+  keyvalue_t kv;
+
+  for (kv=dict; kv; kv = kv->next)
+    if (!strncmp (kv->name, "Meta[", 5) && kv->value && *kv->value)
+      break;
+  if (!kv)
+    return NULL;/* No Meta data field.  */
+
+  fp = es_fopenmem (0, "w+,samethread");
+  if (!fp)
+    {
+      log_error ("error creating new memory stream for the Meta field: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      return NULL;
+    }
+
+  write_meta_field (dict, fp);
+
+  /* Write an extra Nul so that we can snatched the memory as C-string. */
+  if ((writefailed = es_fwrite ("", 1, 1, fp) != 1)
+      || es_fclose_snatch (fp, &buffer, NULL))
+    {
+      log_error ("error closing memory stream for the Meta field: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      if (writefailed)
+        es_fclose (fp);
+      return NULL;
+    }
+
+  return buffer;
 }

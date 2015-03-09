@@ -1,5 +1,5 @@
 /* util.h - Utility definitions for payproc
- * Copyright (C) 2014 g10 Code GmbH
+ * Copyright (C) 2014, 2015 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -103,6 +103,7 @@ extern gpg_err_source_t default_errsource;
 
 
 /*-- util.c --*/
+void severe_error (void);
 void *xmalloc (size_t n);
 void *xrealloc (void *a, size_t n);
 void *xcalloc (size_t n, size_t m);
@@ -149,6 +150,11 @@ gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data);
 
 int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);
+
+void write_escaped (const char *string, estream_t fp);
+void write_meta_field (keyvalue_t dict, estream_t fp);
+char *meta_field_to_string (keyvalue_t dict);
+
 
 /*-- percent.c --*/
 char *percent_plus_escape (const char *string);

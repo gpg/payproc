@@ -96,17 +96,6 @@ struct logfile_s
 static npth_mutex_t logfile_lock = NPTH_MUTEX_INITIALIZER;
 
 
-/* A severe error was encountered.  Stop the process as sson as
-   possible but first give other connections a chance to
-   terminate.  */
-static void
-severe_error (void)
-{
-  /* FIXME: stop only this thread and wait for other threads.  */
-  exit (4);
-}
-
-
 /* Write the log to the log file.  */
 static void
 write_log (const char *buffer)
@@ -256,65 +245,6 @@ start_record (char type, char *timestamp)
 }
 
 
-static void
-write_escaped_buf (const void *buf, size_t len, estream_t fp)
-{
-  const unsigned char *s;
-
-  for (s = buf; len; s++, len--)
-    {
-      if (!strchr (":&\n\r", *s))
-        es_putc (*s, fp);
-      else
-        es_fprintf (fp, "%%%02X", *s);
-    }
-}
-
-
-static void
-write_escaped (const char *string, estream_t fp)
-{
-  write_escaped_buf (string, strlen (string), fp);
-  es_putc (':', fp);
-}
-
-
-/* Iterate over all keys named "Meta[FOO]" for all FOO and print the
-   meta data field.  */
-static void
-write_meta (keyvalue_t dict, estream_t fp)
-{
-  keyvalue_t kv;
-  const char *s, *name;
-  int any = 0;
-
-  for (kv=dict; kv; kv = kv->next)
-    {
-      if (!strncmp (kv->name, "Meta[", 5) && kv->value && *kv->value)
-        {
-          name = kv->name + 5;
-          for (s = name; *s; s++)
-            {
-              if (*s == ']')
-                break;
-              else if (strchr ("=& \t", *s))
-                break;
-            }
-          if (*s != ']' || s == name || s[1])
-            continue; /* Not a valid key.  */
-          if (!any)
-            any = 1;
-          else
-            es_putc ('&', fp);
-          write_escaped_buf (name, s - name, fp);
-          es_putc ('=', fp);
-          write_escaped_buf (kv->value, strlen (kv->value), fp);
-        }
-    }
-  es_putc (':', fp);
-}
-
-
 /* Store a system record in the journal. */
 void
 jrnl_store_sys_record (const char *text)
@@ -324,7 +254,7 @@ jrnl_store_sys_record (const char *text)
   fp = start_record ('$', NULL);
   es_fputs (":::", fp);
   write_escaped (text, fp);
-  es_fputs (":::::::::", fp);
+  es_fputs ("::::::::::", fp);
   write_and_close_fp (fp);
 }
 
@@ -362,15 +292,22 @@ jrnl_store_charge_record (keyvalue_t *dictp, int service)
   dict = *dictp;
   es_fprintf (fp, "%d:", (*keyvalue_get_string (dict, "Live") == 't'));
   write_escaped ((curr=keyvalue_get_string (dict, "Currency")), fp);
+  es_putc (':', fp);
   write_escaped ((amnt=keyvalue_get_string (dict, "Amount")), fp);
+  es_putc (':', fp);
   write_escaped (keyvalue_get_string (dict, "Desc"), fp);
+  es_putc (':', fp);
   write_escaped (keyvalue_get_string (dict, "Email"), fp);
-  write_meta (dict, fp);
+  es_putc (':', fp);
+  write_meta_field (dict, fp);
+  es_putc (':', fp);
   write_escaped (keyvalue_get_string (dict, "Last4"), fp);
-  es_fprintf (fp, "%d:", service);
+  es_fprintf (fp, ":%d:", service);
   es_fputs ("1:", fp);  /* account */
   write_escaped (keyvalue_get_string (dict, "Charge-Id"), fp);
+  es_putc (':', fp);
   write_escaped (keyvalue_get_string (dict, "balance-transaction"), fp);
+  es_putc (':', fp);
   es_fputs (":", fp);   /* rtxid */
   es_fputs (convert_currency (amountbuf, sizeof amountbuf, curr, amnt), fp);
   es_fputs (":", fp);   /* euro */

@@ -23,6 +23,8 @@
 /* cJSON */
 /* JSON parser in C. */
 
+#include <config.h>
+
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
