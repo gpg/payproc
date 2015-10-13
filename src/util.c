@@ -672,6 +672,75 @@ get_current_time (char *timestamp)
 
 
 
+/* Check the amount given in STRING and convert it to the smallest
+   currency unit.  DECDIGITS gives the number of allowed post decimal
+   positions.  Return 0 on error or the converted amount.  */
+unsigned int
+convert_amount (const char *string, int decdigits)
+{
+  const char *s;
+  int ndots = 0;
+  int nfrac = 0;
+  unsigned int value = 0;
+  unsigned int v;
+
+  if (*string == '+')
+    string++; /* Skip an optional leading plus sign.  */
+  for (s = string; *s; s++)
+    {
+      if (*s == '.')
+        {
+          if (!decdigits)
+            return 0; /* Post decimal digits are not allowed.  */
+          if (++ndots > 1)
+            return 0; /* Too many decimal points.  */
+        }
+      else if (!strchr ("0123456789", *s))
+        return 0;
+      else if (ndots && ++nfrac > decdigits)
+        return 0; /* Too many post decimal digits.  */
+      else
+        {
+          v = 10*value + (*s - '0');
+          if (v < value)
+            return 0; /* Overflow.  */
+          value = v;
+        }
+    }
+
+  for (; nfrac < decdigits; nfrac++)
+    {
+      v = 10*value;
+      if (v < value)
+        return 0; /* Overflow.  */
+      value = v;
+    }
+
+  return value;
+}
+
+
+/* Return a string with the amount computed from CENTS.  DECDIGITS
+   gives the number of post decimal positions in CENTS.  Return NULL
+   on error.  es_free must be used to release the return value.  */
+char *
+reconvert_amount (int cents, int decdigits)
+{
+  unsigned int tens;
+  int i;
+
+  if (decdigits <= 0)
+    return es_bsprintf ("%d", cents);
+  else
+    {
+      for (tens=1, i=0; i < decdigits; i++)
+        tens *= 10;
+      return es_bsprintf ("%d.%0*d", cents / tens, decdigits, cents % tens);
+    }
+}
+
+
+
 /* Write buffer BUF of length LEN to stream FP.  Escape all characters
    in a way that the stream can be used for a colon delimited line
    format including structured URL like fields.  */

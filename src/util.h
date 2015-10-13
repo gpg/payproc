@@ -156,6 +156,9 @@ char *zb32_encode (const void *data, unsigned int databits);
 
 char *get_current_time (char *timestamp);
 
+unsigned int convert_amount (const char *string, int decdigits);
+char *reconvert_amount (int cents, int decdigits);
+
 void write_escaped (const char *string, estream_t fp);
 void write_meta_field (keyvalue_t dict, estream_t fp);
 char *meta_field_to_string (keyvalue_t dict);

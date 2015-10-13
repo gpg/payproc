@@ -1,4 +1,4 @@
-/* connection.c - Handle a client request.
+/* commands.c - Handle a client request.
  * Copyright (C) 2014, 2015 g10 Code GmbH
  *
  * This file is part of Payproc.
@@ -33,10 +33,8 @@
 #include "session.h"
 #include "currency.h"
 #include "preorder.h"
-#include "connection.h"
-
-/* Maximum length of an input line.  */
-#define MAX_LINELEN  2048
+#include "protocol-io.h"
+#include "commands.h"
 
 /* Helper macro for the cmd_ handlers.  */
 #define set_error(a,b)                          \
@@ -78,7 +76,7 @@ new_connection_obj (void)
   return conn;
 }
 
-/* Initialize a connection object which has been alloacted with
+/* Initialize a connection object which has been allocated with
    new_connection_obj.  FD is the file descriptor for the
    connection.  */
 void
@@ -137,190 +135,6 @@ id_from_connection_obj (conn_t conn)
 }
 
 
-/* Transform a data line name into a standard capitalized format; e.g.
-   "Content-Type".  Conversion stops at the colon.  As usual we don't
-   use the localized versions of ctype.h.  Parts inside of brackets
-   ([]) are not changed. */
-static void
-capitalize_name (char *name)
-{
-  int first = 1;
-  int bracket = 0;
-
-  for (; *name && *name != ':'; name++)
-    {
-      if (bracket)
-        {
-          if (*name == ']')
-            bracket--;
-        }
-      else if (*name == '[')
-        bracket++;
-      else if (*name == '-')
-        first = 1;
-      else if (first)
-        {
-          if (*name >= 'a' && *name <= 'z')
-            *name = *name - 'a' + 'A';
-          first = 0;
-        }
-      else if (*name >= 'A' && *name <= 'Z')
-        *name = *name - 'A' + 'a';
-    }
-}
-
-
-/* Store a data LINE away.  The fucntion expects that the terminating
-   linefeed has already been stripped.  Line continuation is supported
-   as well as merging of headers with the same name. This function may
-   modify LINE. */
-static gpg_error_t
-store_data_line (conn_t conn, char *line)
-{
-  char *p, *value;
-  keyvalue_t kv;
-
-  if (*line == ' ' || *line == '\t')
-    {
-      /* Continuation.  */
-      if (!conn->dataitems)
-        return gpg_error (GPG_ERR_PROTOCOL_VIOLATION);
-      return keyvalue_append_with_nl (conn->dataitems, line+1);
-    }
-
-  /* A name must start with a letter.  Note that for items used only
-     internally a name may start with an underscore. */
-  capitalize_name (line);
-  if (*line < 'A' || *line > 'Z')
-    return gpg_error (GPG_ERR_INV_NAME);
-
-  p = strchr (line, ':');
-  if (!p)
-    return GPG_ERR_PROTOCOL_VIOLATION;
-  *p++ = 0;
-  while (*p == ' ' || *p == '\t')
-    p++;
-  value = p;
-
-  for (kv = conn->dataitems; kv; kv = kv->next)
-    if (!strcmp (kv->name, line))
-      break;
-  if (kv)
-    {
-      /* We have already seen a line with that name.  */
-      /* Fixme: We should use this to allow for an array, like it is
-         done by the addrutil tool.  */
-      return GPG_ERR_PROTOCOL_VIOLATION;
-    }
-
-  /* Insert a new data item. */
-  return keyvalue_put (&conn->dataitems, line, value);
-}
-
-
-/* Read the request into the CONN object.  Return 0 on success.  */
-static gpg_error_t
-read_request (conn_t conn)
-{
-  gpg_error_t err;
-  char *buffer = NULL;       /* Line buffer. */
-  size_t buffer_size = 0;    /* Current length of buffer.  */
-  ssize_t nread;
-  size_t maxlen;
-  size_t n;
-
-  /* Read the command line. */
-  maxlen = MAX_LINELEN;
-  nread = es_read_line (conn->stream, &buffer, &buffer_size, &maxlen);
-  if (nread < 0)
-    {
-      err = gpg_error_from_syserror ();
-      es_free (buffer);
-      log_error ("reading request failed: %s\n", gpg_strerror (err));
-      return err;
-    }
-  if (!maxlen)
-    {
-      es_free (buffer);
-      log_error ("reading request failed: %s\n", "command line too long");
-      return GPG_ERR_TRUNCATED;
-    }
-  if (!nread)
-    {
-      es_free (buffer);
-      log_error ("reading request failed: %s\n",
-                 "EOF while reading command line");
-      return GPG_ERR_EOF;
-    }
-  /* Strip linefeed.  */
-  n = strlen (buffer);
-  if (n && buffer[n-1] == '\n')
-    {
-      buffer[--n] = 0;
-      if (n && buffer[n-1] == '\r')
-        buffer[--n] = 0;
-    }
-
-  conn->command = xtrystrdup (buffer);
-  if (!conn->command)
-    {
-      err = gpg_err_code_from_syserror ();
-      es_free (buffer);
-      return err;
-    }
-
-  /* Read data lines and wait for the terminating empty line. */
-  do
-    {
-      maxlen = MAX_LINELEN;
-      nread = es_read_line (conn->stream, &buffer, &buffer_size, &maxlen);
-      if (nread < 0)
-        {
-          err = gpg_err_code_from_syserror ();
-          es_free (buffer);
-          log_error ("reading request failed: %s\n", gpg_strerror (err));
-          return err;
-        }
-      if (!maxlen)
-        {
-          es_free (buffer);
-          log_error ("reading request failed: %s\n", "data line too long");
-          return GPG_ERR_TRUNCATED;
-        }
-      if (!nread)
-        {
-          es_free (buffer);
-          log_error ("reading request failed: %s\n",
-                     "EOF while reading data line");
-          return GPG_ERR_EOF;
-        }
-
-      /* Strip linefeed.  */
-      n = strlen (buffer);
-      if (n && buffer[n-1] == '\n')
-        {
-          buffer[--n] = 0;
-          if (n && buffer[n-1] == '\r')
-            buffer[--n] = 0;
-        }
-
-      if (*buffer)
-        {
-          err = store_data_line (conn, buffer);
-          if (err)
-            {
-              es_free (buffer);
-              return err;
-            }
-        }
-    }
-  while (*buffer);
-  es_free (buffer);
-
-  return 0;
-}
-
-
 static void
 write_data_line (keyvalue_t kv, estream_t fp)
 {
@@ -344,79 +158,6 @@ write_data_line (keyvalue_t kv, estream_t fp)
         es_putc (*value, fp);
     }
   es_putc ('\n', fp);
-}
-
-
-
-/*
- * Helper functions.
- */
-
-/* Check the amount given in STRING and convert it to the smallest
-   currency unit.  DECDIGITS gives the number of allowed post decimal
-   positions.  Return 0 on error or the converted amount.  */
-static unsigned int
-convert_amount (const char *string, int decdigits)
-{
-  const char *s;
-  int ndots = 0;
-  int nfrac = 0;
-  unsigned int value = 0;
-  unsigned int v;
-
-  if (*string == '+')
-    string++; /* Skip an optioanl leading plus sign.  */
-  for (s = string; *s; s++)
-    {
-      if (*s == '.')
-        {
-          if (!decdigits)
-            return 0; /* Post decimal digits are not allowed.  */
-          if (++ndots > 1)
-            return 0; /* Too many decimal points.  */
-        }
-      else if (!strchr ("0123456789", *s))
-        return 0;
-      else if (ndots && ++nfrac > decdigits)
-        return 0; /* Too many post decimal digits.  */
-      else
-        {
-          v = 10*value + (*s - '0');
-          if (v < value)
-            return 0; /* Overflow.  */
-          value = v;
-        }
-    }
-
-  for (; nfrac < decdigits; nfrac++)
-    {
-      v = 10*value;
-      if (v < value)
-        return 0; /* Overflow.  */
-      value = v;
-    }
-
-  return value;
-}
-
-
-/* Return a string with the amount computed from CENTS.  DECDIGITS
-   gives the number of post decimal positions in CENTS.  Return NULL
-   on error.  es_free must be used to release the return value. */
-static char *
-reconvert_amount (int cents, int decdigits)
-{
-  unsigned int tens;
-  int i;
-
-  if (decdigits <= 0)
-    return es_bsprintf ("%d", cents);
-  else
-    {
-      for (tens=1, i=0; i < decdigits; i++)
-        tens *= 10;
-      return es_bsprintf ("%d.%0*d", cents / tens, decdigits, cents % tens);
-    }
 }
 
 
@@ -1181,7 +922,7 @@ connection_handler (conn_t conn)
       return;
     }
 
-  err = read_request (conn);
+  err = protocol_read_request (conn->stream, &conn->command, &conn->dataitems);
   if (err)
     {
       log_error ("reading request failed: %s\n", gpg_strerror (err));

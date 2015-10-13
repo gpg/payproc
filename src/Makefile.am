@@ -32,7 +32,8 @@ common_sources = \
 	membuf.c membuf.h \
 	strlist.c strlist.h \
 	percent.c \
-	argparse.c argparse.h
+	argparse.c argparse.h \
+	protocol-io.c protocol-io.h
 
 common_headers = \
 	jrnl-fields.h
@@ -49,7 +50,7 @@ utility_sources = \
 
 payprocd_SOURCES = \
 	payprocd.c payprocd.h \
-	connection.c connection.h \
+	commands.c commands.h \
 	currency.c currency.h \
 	stripe.c stripe.h \
 	paypal.c paypal-ipn.c paypal.h \
@@ -78,7 +79,7 @@ ppipnhd_SOURCES = ppipnhd.c
 ppipnhd_CFLAGS =
 ppipnhd_LDADD =
 
-module_tests = t-connection t-preorder
+module_tests = t-commands t-preorder
 
 AM_CFLAGS = $(GPG_ERROR_CFLAGS)
 LDADD  = -lm libcommon.a $(GPG_ERROR_LIBS)
@@ -93,11 +94,11 @@ t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
 
-t_connection_SOURCES = t-connection.c stripe.c paypal.c paypal-ipn.c \
-		       preorder.c \
-                       journal.c session.c currency.c $(t_common_sources)
-t_connection_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS)
-t_connection_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS)
+t_commands_SOURCES = t-commands.c stripe.c paypal.c paypal-ipn.c \
+	             preorder.c \
+                     journal.c session.c currency.c $(t_common_sources)
+t_commands_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS)
+t_commands_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS)
 
 t_preorder_SOURCES = t-preorder.c $(t_common_sources) journal.c currency.c
 t_preorder_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS)

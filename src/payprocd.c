@@ -35,7 +35,7 @@
 #include "util.h"
 #include "logging.h"
 #include "argparse.h"
-#include "connection.h"
+#include "commands.h"
 #include "tlssupport.h"
 #include "cred.h"
 #include "journal.h"

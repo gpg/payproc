@@ -30,7 +30,7 @@
 /src/y3
 /src/stripe.livekey
 /src/stripe.testkey
-/src/t-connection
+/src/t-commands
 /src/out2
 /payproc-*.tar.bz2
 /src/payproc-jrnl

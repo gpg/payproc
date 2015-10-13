@@ -1,4 +1,4 @@
-/* t-connection.c - Regression test for parts of connection.c
+/* t-commands.c - Regression test for parts of commands.c
  * Copyright (C) 2014 g10 Code GmbH
  *
  * This file is part of Payproc.
@@ -24,7 +24,7 @@
 
 #include "t-common.h"
 
-#include "connection.c" /* The module under test.  */
+#include "commands.c" /* The module under test.  */
 
 
 static void

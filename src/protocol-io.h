@@ -1,5 +1,5 @@
-/* connection.h - Definitions pertaining to a connection.
- * Copyright (C) 2014 g10 Code GmbH
+/* protocol-io.h - Server protocol helper helper functions.
+ * Copyright (C) 2015 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -17,21 +17,10 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef CONNECTION_H
-#define CONNECTION_H
+#ifndef PROTOCOL_IO_H
+#define PROTOCOL_IO_H
 
-struct conn_s;
-typedef struct conn_s *conn_t;
+gpg_error_t protocol_read_request (estream_t stream,
+                                   char **r_command, keyvalue_t *dataitems);
 
-
-/*-- connection.c --*/
-conn_t new_connection_obj (void);
-void init_connection_obj (conn_t conn, int fd);
-void release_connection_obj (conn_t conn);
-unsigned int id_from_connection_obj (conn_t conn);
-int fd_from_connection_obj (conn_t conn);
-
-void connection_handler (conn_t conn);
-
-
-#endif /*CONNECTION_H*/
+#endif /*PROTOCOL_IO_H*/

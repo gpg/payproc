@@ -36,10 +36,11 @@
   Expiring entries can be done using
 
      DELETE from preorder
-     WHERE julianday(created) < julianday('now', '-30 days');
+     WHERE julianday(created) < julianday('now', '-30 days')
+           AND paid IS NULL;
 
-  this has not been implemneted but should be done at startup and
-  every day here.
+  this has not been implemented here but should be done at startup and
+  once a day.
 
  */
 
@@ -198,7 +199,7 @@ open_preorder_db (void)
 
   /* Database has not yet been opened.  Open or create it, make sure
      the tables exist, and prepare the required statements.  We use
-     out own locking instead of the more complex serialization sqlite
+     our own locking instead of the more complex serialization sqlite
      would have to do. */
 
   res = sqlite3_open_v2 (preorder_db_fname,
