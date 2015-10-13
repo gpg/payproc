@@ -22,5 +22,6 @@
 
 gpg_error_t protocol_read_request (estream_t stream,
                                    char **r_command, keyvalue_t *dataitems);
+gpg_error_t protocol_read_response (estream_t stream, keyvalue_t *dataitems);
 
 #endif /*PROTOCOL_IO_H*/

@@ -69,9 +69,10 @@ capitalize_name (char *name)
    linefeed has already been stripped.  Line continuation is supported
    as well as merging of headers with the same name.  This function
    may modify LINE.  DATAITEMS is a pointer to a key-value list which
-   received the the data.  */
+   received the the data.  With FILTER set capitalize field names and
+   do not allow special names.  */
 static gpg_error_t
-store_data_line (char *line, keyvalue_t *dataitems)
+store_data_line (char *line, int filter, keyvalue_t *dataitems)
 {
   char *p, *value;
   keyvalue_t kv;
@@ -86,9 +87,12 @@ store_data_line (char *line, keyvalue_t *dataitems)
 
   /* A name must start with a letter.  Note that for items used only
      internally a name may start with an underscore. */
-  capitalize_name (line);
-  if (*line < 'A' || *line > 'Z')
-    return gpg_error (GPG_ERR_INV_NAME);
+  if (filter)
+    {
+      capitalize_name (line);
+      if (*line < 'A' || *line > 'Z')
+        return gpg_error (GPG_ERR_INV_NAME);
+    }
 
   p = strchr (line, ':');
   if (!p)
@@ -114,12 +118,13 @@ store_data_line (char *line, keyvalue_t *dataitems)
 }
 
 
-/* Read the request into R_COMMAND and update DATATITEMS with the data
-   from the request.  Return 0 on success.  Note that on error NULL is
-   stored at R_command but DATAITEMS may have changed.  */
-gpg_error_t
-protocol_read_request (estream_t stream,
-                       char **r_command, keyvalue_t *dataitems)
+/* Read a protocol chunk into R_COMMAND and update DATATITEMS with
+   the data item.  Return 0 on success.  Note that on error NULL is
+   stored at R_command but DATAITEMS may have changed.  With FILTER
+   set capitalize field names and do not allow special names. */
+static gpg_error_t
+read_data (estream_t stream, int filter,
+           char **r_command, keyvalue_t *dataitems)
 {
   gpg_error_t err;
   char *buffer = NULL;       /* Line buffer. */
@@ -213,7 +218,7 @@ protocol_read_request (estream_t stream,
 
       if (*buffer)
         {
-          err = store_data_line (buffer, dataitems);
+          err = store_data_line (buffer, filter, dataitems);
           if (err)
             {
               es_free (buffer);
@@ -227,4 +232,66 @@ protocol_read_request (estream_t stream,
   es_free (buffer);
 
   return 0;
+}
+
+
+/* Read the request into R_COMMAND and update DATATITEMS with the data
+   from the request.  Return 0 on success.  Note that on error NULL is
+   stored at R_command but DATAITEMS may have changed.  */
+gpg_error_t
+protocol_read_request (estream_t stream,
+                       char **r_command, keyvalue_t *dataitems)
+{
+  return read_data (stream, 1, r_command, dataitems);
+}
+
+
+/* Read the response and update DATAITEMS with the data from the
+   response.  Return 0 on success.  On error an error is returned.  If
+   that error has been returned by the server the description of the
+   error is stored in DATAITEM under the key "_errdesc"; if the error
+   is local "_errdesc" is not set.  */
+gpg_error_t
+protocol_read_response (estream_t stream, keyvalue_t *dataitems)
+{
+  gpg_error_t err, err2;
+  char *status;
+  const char *s;
+
+  keyvalue_del (*dataitems, "_errdesc");
+  err = read_data (stream, 0, &status, dataitems);
+  if (err)
+    return err;
+
+  if (has_leading_keyword (status, "OK"))
+    ;
+  else if ((s = has_leading_keyword (status, "ERR")))
+    {
+      unsigned long n;
+      char *endp;
+
+      n = strtoul (s, &endp, 10);
+      if (!n)
+        err = gpg_error (GPG_ERR_PROTOCOL_VIOLATION);
+      else
+        {
+          err = n;
+          for (s = endp; *s == ' ' || *s == '\t'; s++)
+            ;
+          if (!*s)
+            s = gpg_strerror (err);
+
+          err2 = keyvalue_put (dataitems, "_errdesc", s);
+          if (err2)
+            {
+              keyvalue_del (*dataitems, "_errdesc");
+              err = err2;
+            }
+        }
+    }
+  else
+    err = gpg_error (GPG_ERR_INV_RESPONSE);
+
+  xfree (status);
+  return err;
 }
