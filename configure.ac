@@ -190,7 +190,7 @@ fi
 #
 # SQLite
 #
-PKG_CHECK_MODULES([SQLITE3],[sqlite3 >= 3.5],
+PKG_CHECK_MODULES([SQLITE3],[sqlite3 >= 3.8],
                             [have_sqlite3=yes],
                             [have_sqlite3=no])
 if test "$have_sqlite3" = "yes"; then
