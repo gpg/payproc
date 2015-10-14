@@ -20,6 +20,13 @@
 #ifndef JOURNAL_H
 #define JOURNAL_H
 
+#define PAYMENT_SERVICE_NONE   0
+#define PAYMENT_SERVICE_STRIPE 1
+#define PAYMENT_SERVICE_PAYPAL 2
+#define PAYMENT_SERVICE_SEPA   3
+#define PAYMENT_SERVICE_USER   255
+
+
 void jrnl_set_file (const char *fname);
 void jrnl_store_sys_record (const char *text);
 void jrnl_store_exchange_rate_record (const char *currency, double rate);

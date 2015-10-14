@@ -39,3 +39,5 @@
 /src/ppipnhd
 /src/payproc-stat
 /src/t-preorder
+/src/payproc-post
+/src/t-util

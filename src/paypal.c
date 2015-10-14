@@ -370,7 +370,7 @@ backup_field (keyvalue_t *targetp, keyvalue_t dict, const char *name)
 }
 
 
-/* Copy all "_Meta[FOO]" fields from DICT to TARGETP but remove tye
+/* Copy all "_Meta[FOO]" fields from DICT to TARGETP but remove the
    '_' prefix.  */
 static gpg_error_t
 restore_meta (keyvalue_t *targetp, keyvalue_t dict)

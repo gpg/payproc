@@ -216,7 +216,7 @@ read_data (estream_t stream, int filter,
             buffer[--n] = 0;
         }
 
-      if (*buffer)
+      if (*buffer && *buffer != '#' )
         {
           err = store_data_line (buffer, filter, dataitems);
           if (err)

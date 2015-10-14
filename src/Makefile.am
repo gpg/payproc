@@ -18,7 +18,7 @@
 
 EXTRA_DIST = cJSON.readme tls-ca.pem
 
-bin_PROGRAMS = payprocd payproc-jrnl payproc-stat ppipnhd
+bin_PROGRAMS = payprocd payproc-jrnl payproc-stat payproc-post ppipnhd
 noinst_PROGRAMS = $(module_tests) t-http
 noinst_LIBRARIES = libcommon.a libcommonpth.a
 dist_pkglibexec_SCRIPTS = geteuroxref
@@ -75,11 +75,15 @@ payproc_stat_SOURCES = \
         payproc-stat.c \
 	$(common_headers)
 
+payproc_post_SOURCES = \
+        payproc-post.c \
+	$(common_headers)
+
 ppipnhd_SOURCES = ppipnhd.c
 ppipnhd_CFLAGS =
 ppipnhd_LDADD =
 
-module_tests = t-commands t-preorder
+module_tests = t-util t-commands t-preorder
 
 AM_CFLAGS = $(GPG_ERROR_CFLAGS)
 LDADD  = -lm libcommon.a $(GPG_ERROR_LIBS)
@@ -93,6 +97,11 @@ t_common_ldadd   = libcommonpth.a $(GPG_ERROR_LIBS) $(NPTH_LIBS) \
 t_http_SOURCES = t-http.c $(t_common_sources)
 t_http_CFLAGS  = $(t_common_cflags)
 t_http_LDADD   = $(t_common_ldadd)
+
+# (util.c is part of t_common_sources)
+t_util_SOURCES = t-util.c $(t_common_sources)
+t_util_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS)
+t_util_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS)
 
 t_commands_SOURCES = t-commands.c stripe.c paypal.c paypal-ipn.c \
 	             preorder.c \

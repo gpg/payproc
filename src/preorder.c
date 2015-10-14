@@ -40,7 +40,9 @@
            AND paid IS NULL;
 
   this has not been implemented here but should be done at startup and
-  once a day.
+  once a day.  Note that 'paid' tracks actual payments using this ref.
+  We do not delete it from the DB so that the ref can be used for
+  recurring payments.
 
  */
 
@@ -78,10 +80,26 @@ static npth_mutex_t preorder_db_lock = NPTH_MUTEX_INITIALIZER;
    protected by preorder_db_lock.  */
 static sqlite3_stmt *preorder_insert_stmt;
 
+/* This is a prepared statement for the UPDATE operation.  It is
+   protected by preorder_db_lock.  */
+static sqlite3_stmt *preorder_update_stmt;
+
+/* This is a prepared statement for the SELECT by REF operation.  It
+   is protected by preorder_db_lock.  */
+static sqlite3_stmt *preorder_select_stmt;
+
+/* This is a prepared statement for the SELECT by REFNN operation.  It
+   is protected by preorder_db_lock.  */
+static sqlite3_stmt *preorder_selectrefnn_stmt;
+
+/* This is a prepared statement for the SELECT all operation.  It
+   is protected by preorder_db_lock.  */
+static sqlite3_stmt *preorder_selectlist_stmt;
+
 
 
 
-/* Create a SEPA-Ref field and store it in BUFFER.  The format is:
+/* Create a Sepa-Ref field and store it in BUFFER.  The format is:
 
      AAAAA-NN
 
@@ -167,6 +185,14 @@ close_preorder_db (int do_close)
         {
           sqlite3_finalize (preorder_insert_stmt);
           preorder_insert_stmt = NULL;
+          sqlite3_finalize (preorder_update_stmt);
+          preorder_update_stmt = NULL;
+          sqlite3_finalize (preorder_select_stmt);
+          preorder_select_stmt = NULL;
+          sqlite3_finalize (preorder_selectrefnn_stmt);
+          preorder_selectrefnn_stmt = NULL;
+          sqlite3_finalize (preorder_selectlist_stmt);
+          preorder_selectlist_stmt = NULL;
           res = sqlite3_close (preorder_db);
         }
       if (res)
@@ -265,12 +291,69 @@ open_preorder_db (void)
     }
   preorder_insert_stmt = stmt;
 
+  /* Prepare an update statement.  */
+  res = sqlite3_prepare_v2 (preorder_db,
+                            "UPDATE preorder SET"
+                            " paid = ?2,"
+                            " npaid = npaid + 1"
+                            " WHERE ref=?1",
+                            -1, &stmt, NULL);
+  if (res)
+    {
+      log_error ("error preparing update statement: %s\n",
+                 sqlite3_errstr (res));
+      close_preorder_db (1);
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+  preorder_update_stmt = stmt;
+
+  /* Prepare a select statement.  */
+  res = sqlite3_prepare_v2 (preorder_db,
+                            "SELECT * FROM preorder WHERE ref=?1",
+                            -1, &stmt, NULL);
+  if (res)
+    {
+      log_error ("error preparing select statement: %s\n",
+                 sqlite3_errstr (res));
+      close_preorder_db (1);
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+  preorder_select_stmt = stmt;
+
+  /* Prepare a select-refnn statement.  */
+  res = sqlite3_prepare_v2 (preorder_db,
+                            "SELECT * FROM preorder "
+                            "WHERE refnn=?1 ORDER BY ref",
+                            -1, &stmt, NULL);
+  if (res)
+    {
+      log_error ("error preparing selectrefnn statement: %s\n",
+                 sqlite3_errstr (res));
+      close_preorder_db (1);
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+  preorder_selectrefnn_stmt = stmt;
+
+  /* Prepare a select-list statement.  */
+  res = sqlite3_prepare_v2 (preorder_db,
+                            "SELECT * FROM preorder "
+                            "ORDER BY created DESC, refnn ASC",
+                            -1, &stmt, NULL);
+  if (res)
+    {
+      log_error ("error preparing select statement: %s\n",
+                 sqlite3_errstr (res));
+      close_preorder_db (1);
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+  preorder_selectlist_stmt = stmt;
+
   return 0;
 }
 
 
 /* Insert a record into the preorder table.  The values are taken from
-   the dictionary at DICTP.  On return a SEPA-Ref value will have been
+   the dictionary at DICTP.  On return a Sepa-Ref value will have been
    inserted into it; that may happen even on error.  */
 static gpg_error_t
 insert_preorder_record (keyvalue_t *dictp)
@@ -285,7 +368,7 @@ insert_preorder_record (keyvalue_t *dictp)
 
  retry:
   make_sepa_ref (separef, sizeof separef);
-  err = keyvalue_put (dictp, "SEPA-Ref", separef);
+  err = keyvalue_put (dictp, "Sepa-Ref", separef);
   if (err)
     return err;
   dict = *dictp;
@@ -348,9 +431,175 @@ insert_preorder_record (keyvalue_t *dictp)
 }
 
 
+static gpg_error_t
+get_text_column (sqlite3_stmt *stmt, int idx, int icol, const char *name,
+                 keyvalue_t *dictp)
+{
+  gpg_error_t err;
+  const char *s;
+
+  s = sqlite3_column_text (stmt, icol);
+  if (!s && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+    err = gpg_error (GPG_ERR_ENOMEM);
+  else if (!strcmp (name, "Meta"))
+    err = keyvalue_put_meta (dictp, s);
+  else
+    err = keyvalue_put_idx (dictp, name, idx, s);
+
+  return err;
+}
 
 
-/* Create a new preorder record and store it.  Inserts a "SEPA-Ref"
+/* Put all columns into DICTP.  */
+static gpg_error_t
+get_columns (sqlite3_stmt *stmt, int idx, keyvalue_t *dictp)
+{
+  gpg_error_t err;
+  char separef[9];
+  const char *s;
+  int i;
+
+  s = sqlite3_column_text (stmt, 0);
+  if (!s && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+    err = gpg_error (GPG_ERR_ENOMEM);
+  else
+    {
+      strncpy (separef, s, 5);
+      i = sqlite3_column_int (stmt, 1);
+      if (!i && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+        err = gpg_error (GPG_ERR_ENOMEM);
+      else if (i < 0 || i > 99)
+        err = gpg_error (GPG_ERR_INV_DATA);
+      else
+        {
+          snprintf (separef+5, 4, "-%02d", i);
+          err = keyvalue_put_idx (dictp, "Sepa-Ref", idx, separef);
+        }
+    }
+
+  if (!err)
+    err = get_text_column (stmt, idx, 2, "Created", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 3, "Paid", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 4, "N-Paid", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 5, "Amount", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 6, "Currency", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 7, "Desc", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 8, "Email", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 9, "Meta", dictp);
+
+  return err;
+}
+
+
+/* Get a record from the preorder table.  The values are stored at the
+   dictionary at DICTP.  */
+static gpg_error_t
+get_preorder_record (const char *ref, keyvalue_t *dictp)
+{
+  gpg_error_t err;
+  int res;
+
+  if (strlen (ref) != 5)
+    return gpg_error (GPG_ERR_INV_LENGTH);
+
+  sqlite3_reset (preorder_select_stmt);
+
+  res = sqlite3_bind_text (preorder_select_stmt,
+                           1, ref, 5, SQLITE_TRANSIENT);
+  if (res)
+    {
+      log_error ("error binding a value for the preorder table: %s\n",
+                 sqlite3_errstr (res));
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  res = sqlite3_step (preorder_select_stmt);
+  if (res == SQLITE_ROW)
+    {
+      res = SQLITE_OK;
+      err = get_columns (preorder_select_stmt, -1, dictp);
+    }
+  else if (res == SQLITE_DONE)
+    {
+      res = SQLITE_OK;
+      err = gpg_error (GPG_ERR_NOT_FOUND);
+    }
+  else
+    err = gpg_error (GPG_ERR_GENERAL);
+
+  if (err)
+    {
+      if (res == SQLITE_OK)
+        log_error ("error selecting from preorder table: %s\n",
+                   gpg_strerror (err));
+      else
+        log_error ("error selecting from preorder table: %s [%s (%d)]\n",
+                   gpg_strerror (err), sqlite3_errstr (res), res);
+    }
+  return err;
+}
+
+
+/* Update a row specified by REF in the preorder table.  Also update
+   the timestamp field at DICTP. */
+static gpg_error_t
+update_preorder_record (const char *ref, keyvalue_t *dictp)
+{
+  gpg_error_t err;
+  int res;
+  char datetime_buf [DB_DATETIME_SIZE];
+
+  if (strlen (ref) != 5)
+    return gpg_error (GPG_ERR_INV_LENGTH);
+
+  sqlite3_reset (preorder_update_stmt);
+
+  res = sqlite3_bind_text (preorder_update_stmt,
+                           1, ref, 5,
+                           SQLITE_TRANSIENT);
+  if (!res)
+    res = sqlite3_bind_text (preorder_update_stmt,
+                             2, db_datetime_now (datetime_buf), -1,
+                             SQLITE_TRANSIENT);
+  if (res)
+    {
+      log_error ("error binding a value for the preorder table: %s\n",
+                 sqlite3_errstr (res));
+      return gpg_error (GPG_ERR_GENERAL);
+    }
+
+  res = sqlite3_step (preorder_update_stmt);
+  if (res == SQLITE_DONE)
+    {
+      if (!sqlite3_changes (preorder_db))
+        err = gpg_error (GPG_ERR_NOT_FOUND);
+      else
+        err = 0;
+    }
+  else
+    err = gpg_error (GPG_ERR_GENERAL);
+
+  if (!err)
+    err = keyvalue_put (dictp, "_timestamp", datetime_buf);
+
+  if (gpg_err_code (err) == GPG_ERR_GENERAL)
+    log_error ("error updating preorder table: %s [%s (%d)]\n",
+               gpg_strerror (err), sqlite3_errstr (res), res);
+  else
+    log_error ("error updating preorder table: %s\n",
+               gpg_strerror (err));
+  return err;
+}
+
+
+/* Create a new preorder record and store it.  Inserts a "Sepa-Ref"
    into DICT.  */
 gpg_error_t
 preorder_store_record (keyvalue_t *dictp)
@@ -364,6 +613,89 @@ preorder_store_record (keyvalue_t *dictp)
   err = insert_preorder_record (dictp);
 
   close_preorder_db (0);
+
+  return err;
+}
+
+
+/* Take the Sepa-Ref from DICTP, fetch the row, and update DICTP with
+   that data.  On error return an error code.  Note that DICTP may
+   even be changed on error.  */
+gpg_error_t
+preorder_get_record (keyvalue_t *dictp)
+{
+  gpg_error_t err;
+  char separef[9];
+  const char *s;
+  char *p;
+
+  s = keyvalue_get (*dictp, "Sepa-Ref");
+  if (!s || strlen (s) >= sizeof separef)
+    return gpg_error (GPG_ERR_INV_LENGTH);
+  strcpy (separef, s);
+  p = strchr (separef, '-');
+  if (p)
+    *p = 0;
+
+  err = open_preorder_db ();
+  if (err)
+    return err;
+
+  err = get_preorder_record (separef, dictp);
+
+  close_preorder_db (0);
+
+  return err;
+}
+
+
+/* Take the Sepa-Ref from NEWDATA and update the corresponding row with
+   the other data from NEWDATA.  On error return an error code.  */
+gpg_error_t
+preorder_update_record (keyvalue_t newdata)
+{
+  gpg_error_t err;
+  char separef[9];
+  const char *s;
+  char *p;
+  keyvalue_t olddata = NULL;
+
+  s = keyvalue_get (newdata, "Sepa-Ref");
+  if (!s || strlen (s) >= sizeof separef)
+    return gpg_error (GPG_ERR_INV_LENGTH);
+  strcpy (separef, s);
+  p = strchr (separef, '-');
+  if (p)
+    *p = 0;
+
+  err = open_preorder_db ();
+  if (err)
+    return err;
+
+  err = get_preorder_record (separef, &olddata);
+  if (err)
+    goto leave;
+
+  /* Update OLDDATA with the actual amount so that we can put the
+     correct amount into the log.  */
+  err = keyvalue_put (&olddata, "Amount",
+                      keyvalue_get_string (newdata, "Amount"));
+  if (err)
+    goto leave;
+
+  /* We pass OLDDATA so that _timestamp will be set.  */
+  err = update_preorder_record (separef, &olddata);
+  if (err)
+    goto leave;
+
+  /* FIXME: Unfortunately the journal function creates its own
+     timestamp.  */
+  jrnl_store_charge_record (&olddata, PAYMENT_SERVICE_SEPA);
+
+
+ leave:
+  close_preorder_db (0);
+  keyvalue_release (olddata);
 
   return err;
 }

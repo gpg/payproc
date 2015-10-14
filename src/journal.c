@@ -47,11 +47,12 @@
    |  8 | meta     | Structured field with additional data          |
    |  9 | last4    | The last 4 digits of the card                  |
    | 10 | service  | Payment service (0=n/a, 1=stripe.com,2=PayPal, |
-   |    |          | 3=SEPA, 255=user)                              |
+   |    |          | 3=SEPA, 255=user (PAYMENT_SERVICE_xxx))        |
    | 11 | account  | Account number                                 |
    | 12 | chargeid | Charge id                                      |
    | 13 | txid     | Transaction id                                 |
    | 14 | rtxid    | Reference txid (e.g. for refunds)              |
+   |    |          | For preorders, this is the Sepa-Ref            |
    | 15 | euro     | amount converted to Euro                       |
    |----+----------+------------------------------------------------|
 
@@ -274,6 +275,8 @@ jrnl_store_charge_record (keyvalue_t *dictp, int service)
   es_putc (':', fp);
   write_escaped (keyvalue_get_string (dict, "balance-transaction"), fp);
   es_putc (':', fp);
+  if (service == PAYMENT_SERVICE_SEPA)
+    write_escaped (keyvalue_get_string (dict, "Sepa-Ref"), fp);
   es_fputs (":", fp);   /* rtxid */
   es_fputs (convert_currency (amountbuf, sizeof amountbuf, curr, amnt), fp);
   es_fputs (":", fp);   /* euro */

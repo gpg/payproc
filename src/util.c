@@ -149,6 +149,20 @@ strconcat (const char *s1, ...)
 }
 
 
+/* Upcase all ASCII characters in S.  */
+char *
+ascii_strupr (char *s)
+{
+  char *p = s;
+
+  for (p=s; *p; p++ )
+    if (!(*p & 0x80) && *p >= 'a' && *p <= 'z')
+      *p &= ~0x20;
+
+  return s;
+}
+
+
 
 /*
  * Check whether STRING starts with KEYWORD.  The keyword is
@@ -317,7 +331,7 @@ keyvalue_append_with_nl (keyvalue_t kv, const char *value)
 
 
 /* Remove all newlines from the value of KV.  This is done in place
-   and and works always.  */
+   and works always.  */
 void
 keyvalue_remove_nl (keyvalue_t kv)
 {
@@ -367,6 +381,37 @@ keyvalue_put (keyvalue_t *list, const char *key, const char *value)
 }
 
 
+/* This is the same as keyvalue_put but KEY is modified to include
+   an index.  For example when using a value of 7 for IDX we get
+
+     "Desc"       -> "Desc[7]"
+     "Meta[Name]" -> "Meta[Name.7]"
+
+   If IDX is -1 the function is identical to keyvalue_put.
+ */
+gpg_error_t
+keyvalue_put_idx (keyvalue_t *list, const char *key, int idx, const char *value)
+{
+  char name[65];
+  size_t n;
+
+  if (idx < 0)
+    return keyvalue_put (list, key, value);
+
+  n = strlen (key);
+  if (n > 2 && key[n-1] == ']')
+    snprintf (name, sizeof name, "%.*s.%d]", (int)n-1, key, idx);
+  else
+    snprintf (name, sizeof name, "%s[%d]", key, idx);
+
+  if (strlen (name) >= sizeof name - 1)
+    return gpg_error (GPG_ERR_INV_LENGTH);
+
+  return keyvalue_put (list, name, value);
+}
+
+
+
 gpg_error_t
 keyvalue_del (keyvalue_t list, const char *key)
 {
@@ -396,6 +441,61 @@ keyvalue_putf (keyvalue_t *list, const char *key, const char *format, ...)
   if (err)
     es_free (value);
   return err;
+}
+
+/* Store STRING as "Meta" field at LIST.  */
+gpg_error_t
+keyvalue_put_meta (keyvalue_t *list, const char *string)
+{
+  gpg_error_t err;
+  char *buffer;
+  char key[64];
+  char *next, *p;
+  int i;
+
+  buffer = xtrystrdup (string);
+  if (!buffer)
+    return gpg_error_from_syserror ();
+
+  next = buffer;
+  do
+    {
+      strcpy (key, "Meta[");
+      for (i=5, p = next; *p != '='; i++, p++)
+        {
+          if (!*p || strchr ("%:&\n\r", *p) || i >= sizeof key - 3)
+            {
+              xfree (buffer);
+              return gpg_error (GPG_ERR_INV_VALUE);  /* No or invalid name.  */
+            }
+          else
+            key[i] = *p;
+        }
+      if (i==5)
+        {
+          xfree (buffer);
+          return gpg_error (GPG_ERR_INV_VALUE);  /* Zero length name.  */
+        }
+      key[i++] = ']';
+      key[i] = 0;
+      p++;
+
+      next = strchr (p, '&');
+      if (next)
+        *next++ = 0;
+
+      p[percent_unescape_inplace (p, 0)] = 0;
+      err = keyvalue_put (list, key, p);
+      if (err)
+        {
+          xfree (buffer);
+          return err;
+        }
+    }
+  while (next && *next);
+
+  xfree (buffer);
+  return 0;
 }
 
 

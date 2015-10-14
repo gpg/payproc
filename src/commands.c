@@ -489,7 +489,7 @@ cmd_chargecard (conn_t conn, char *args)
   err = keyvalue_put (&conn->dataitems, "Amount", buf);
   if (err)
     goto leave;
-  jrnl_store_charge_record (&conn->dataitems, 1);
+  jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_STRIPE);
 
  leave:
   if (err)
@@ -621,7 +621,7 @@ cmd_ppcheckout (conn_t conn, char *args)
       if (err)
         goto leave;
       dict = conn->dataitems;
-      jrnl_store_charge_record (&conn->dataitems, 2);
+      jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_PAYPAL);
       dict = conn->dataitems;
     }
   else
@@ -684,10 +684,9 @@ cmd_ppcheckout (conn_t conn, char *args)
 
    On success these items are returned:
 
-   SEPA-Ref:   A string to be returned to the caller.
+   Sepa-Ref:   A string to be returned to the caller.
    Amount:     The reformatted amount
    Currency:   The value "EUR"
-   _timestamp: The timestamp as written to the preorder db.
 
  */
 static gpg_error_t
@@ -709,6 +708,7 @@ cmd_sepapreorder (conn_t conn, char *args)
       err = keyvalue_put (&conn->dataitems, "Currency", "EUR");
       if (err)
         goto leave;
+      dict = conn->dataitems;
     }
   else if (strcasecmp (s, "EUR"))
     {
@@ -757,6 +757,151 @@ cmd_sepapreorder (conn_t conn, char *args)
   for (kv = conn->dataitems; kv; kv = kv->next)
     if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
       write_data_line (kv, conn->stream);
+
+  es_free (buf);
+  return err;
+}
+
+
+/* The COMMITPREORDER command updates a preorder record and logs the data.
+
+   Sepa-Ref:   The key referencing the preorder
+   Amount:     The actual amount of the payment.
+   Currency:   If given its value must be EUR.
+
+   On success these items are returned:
+
+   Sepa-Ref:   The Sepa-Ref string
+   XXX:        FIXME:
+
+ */
+static gpg_error_t
+cmd_commitpreorder (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  keyvalue_t dict = conn->dataitems;
+  unsigned int cents;
+  keyvalue_t kv;
+  const char *s;
+  char *buf = NULL;
+
+  (void)args;
+
+  s = keyvalue_get_string (dict, "Sepa-Ref");
+  if (!*s)
+    {
+      set_error (MISSING_VALUE, "Key 'Sepa-Ref' not given");
+      goto leave;
+    }
+
+  /* Get currency and amount.  */
+  s = keyvalue_get (dict, "Currency");
+  if (!s)
+    {
+      err = keyvalue_put (&conn->dataitems, "Currency", "EUR");
+      if (err)
+        goto leave;
+      dict = conn->dataitems;
+    }
+  else if (strcasecmp (s, "EUR"))
+    {
+      set_error (INV_VALUE, "Currency must be \"EUR\" if given");
+      goto leave;
+    }
+
+  s = keyvalue_get_string (dict, "Amount");
+  if (!*s || !(cents = convert_amount (s, 2)))
+    {
+      set_error (MISSING_VALUE, "Amount missing or invalid");
+      goto leave;
+    }
+  err = keyvalue_putf (&conn->dataitems, "_amount", "%u", cents);
+  dict = conn->dataitems;
+  if (err)
+    goto leave;
+  buf = reconvert_amount (keyvalue_get_int (conn->dataitems, "_amount"), 2);
+  if (!buf)
+    {
+      err = gpg_error_from_syserror ();
+      conn->errdesc = "error converting _amount";
+      goto leave;
+    }
+  err = keyvalue_put (&conn->dataitems, "Amount", buf);
+  if (err)
+    goto leave;
+
+  err = preorder_update_record (conn->dataitems);
+
+ leave:
+  if (err)
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
+  else
+    {
+      es_fprintf (conn->stream, "OK\n");
+      for (kv = conn->dataitems; kv; kv = kv->next)
+        if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+          write_data_line (kv, conn->stream);
+    }
+
+  es_free (buf);
+  return err;
+}
+
+
+/* The GETPREORDER command retrieves a record from the preorder table.
+
+   Sepa-Ref:   The key to lookup the rceord.
+
+   On success these items are returned:
+
+   Sepa-Ref:   The Sepa-Ref string
+   XXX:        FIXME:
+
+ */
+static gpg_error_t
+cmd_getpreorder (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  keyvalue_t dict = conn->dataitems;
+  keyvalue_t kv;
+  const char *s;
+  char *buf = NULL;
+
+  (void)args;
+
+  s = keyvalue_get_string (dict, "Sepa-Ref");
+  if (!*s)
+    {
+      set_error (MISSING_VALUE, "Key 'Sepa-Ref' not given");
+      goto leave;
+    }
+
+  err = preorder_get_record (&conn->dataitems);
+
+ leave:
+  if (err)
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
+  else
+    {
+      es_fprintf (conn->stream, "OK\n");
+      for (kv = conn->dataitems; kv; kv = kv->next)
+        if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
+          write_data_line (kv, conn->stream);
+    }
 
   es_free (buf);
   return err;
@@ -842,6 +987,23 @@ cmd_checkamount (conn_t conn, char *args)
 
 
 
+/* PPIPNHD is a handler for PayPal notifications.
+
+   Note: This is an asynchronous call: We send okay, *close* the
+   socket, and only then process the IPN.  */
+static gpg_error_t
+cmd_ppipnhd (conn_t conn, char *args)
+{
+  (void)args;
+
+  es_fputs ("OK\n\n", conn->stream);
+  shutdown_connection_obj (conn);
+  paypal_proc_ipn (&conn->dataitems);
+  return 0;
+}
+
+
+
 /* GETINFO is a multipurpose command to return certain config data. It
    requires a subcommand.  See the online help for a list of
    subcommands.
@@ -905,12 +1067,54 @@ cmd_ping (conn_t conn, char *args)
 
 
 
+static gpg_error_t cmd_help (conn_t conn, char *args);
+
+/* The table with all commands. */
+static struct
+{
+  const char *name;
+  gpg_error_t (*handler)(conn_t conn, char *args);
+} cmdtbl[] =
+  {
+    { "SESSION",        cmd_session },
+    { "CARDTOKEN",      cmd_cardtoken },
+    { "CHARGECARD",     cmd_chargecard },
+    { "PPCHECKOUT",     cmd_ppcheckout },
+    { "SEPAPREORDER",   cmd_sepapreorder },
+    { "CHECKAMOUNT",    cmd_checkamount },
+    { "PPIPNHD",        cmd_ppipnhd },
+    { "GETINFO",        cmd_getinfo },
+    { "PING",           cmd_ping },
+    { "COMMITPREORDER", cmd_commitpreorder },
+    { "GETPREORDER",    cmd_getpreorder },
+    { "HELP",           cmd_help },
+    { NULL, NULL}
+  };
+
+
+/* The HELP command lists all commands.  */
+static gpg_error_t
+cmd_help (conn_t conn, char *args)
+{
+  int cmdidx;
+
+  (void)args;
+
+  es_fputs ("OK\n", conn->stream);
+  for (cmdidx=0; cmdtbl[cmdidx].name; cmdidx++)
+    es_fprintf (conn->stream, "# %s\n", cmdtbl[cmdidx].name);
+
+  return 0;
+}
+
+
 /* The handler serving a connection. */
 void
 connection_handler (conn_t conn)
 {
   gpg_error_t err;
   keyvalue_t kv;
+  int cmdidx;
   char *cmdargs;
 
   conn->stream = es_fdopen_nc (conn->fd, "r+,samethread");
@@ -931,30 +1135,14 @@ connection_handler (conn_t conn)
     }
   es_fflush (conn->stream);
 
-  if ((cmdargs = has_leading_keyword (conn->command, "SESSION")))
-    err = cmd_session (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "CARDTOKEN")))
-    err = cmd_cardtoken (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "CHARGECARD")))
-    err = cmd_chargecard (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "PPCHECKOUT")))
-    err = cmd_ppcheckout (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "SEPAPREORDER")))
-    err = cmd_sepapreorder (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "CHECKAMOUNT")))
-    err = cmd_checkamount (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "PPIPNHD")))
+  cmdargs = NULL;
+  for (cmdidx=0; cmdtbl[cmdidx].name; cmdidx++)
+    if ((cmdargs = has_leading_keyword (conn->command, cmdtbl[cmdidx].name)))
+      break;
+  if (cmdargs)
     {
-      /* This is an asynchronous call.  Thus send okay, close the
-         socket, and only then process the IPN.  */
-      es_fputs ("OK\n\n", conn->stream);
-      shutdown_connection_obj (conn);
-      paypal_proc_ipn (&conn->dataitems);
+      err = cmdtbl[cmdidx].handler (conn, cmdargs);
     }
-  else if ((cmdargs = has_leading_keyword (conn->command, "GETINFO")))
-    err = cmd_getinfo (conn, cmdargs);
-  else if ((cmdargs = has_leading_keyword (conn->command, "PING")))
-    err = cmd_ping (conn, cmdargs);
   else
     {
       es_fprintf (conn->stream, "ERR 1 (Unknown command)\n");

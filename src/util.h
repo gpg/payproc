@@ -117,6 +117,7 @@ char *xstrdup (const char *string);
    malloc error or if too many arguments are given.  */
 char *strconcat (const char *s1, ...) JNLIB_GCC_A_SENTINEL(0);
 
+char *ascii_strupr (char *s);
 
 char *has_leading_keyword (const char *string, const char *keyword);
 const char *memstr (const void *buffer, size_t buflen, const char *sub);
@@ -137,11 +138,14 @@ typedef struct keyvalue_s *keyvalue_t;
 
 gpg_error_t keyvalue_append_with_nl (keyvalue_t kv, const char *value);
 void keyvalue_remove_nl (keyvalue_t kv);
-gpg_error_t keyvalue_put (keyvalue_t *list,
-                               const char *key, const char *value);
+gpg_error_t keyvalue_put (keyvalue_t *list, const char *key,
+                          const char *value);
+gpg_error_t keyvalue_put_idx (keyvalue_t *list, const char *key, int idx,
+                              const char *value);
 gpg_error_t keyvalue_del (keyvalue_t list, const char *key);
 gpg_error_t keyvalue_putf (keyvalue_t *list, const char *key,
                            const char *format, ...) JNLIB_GCC_A_PRINTF (3,4);
+gpg_error_t keyvalue_put_meta (keyvalue_t *list, const char *string);
 void keyvalue_release (keyvalue_t kv);
 keyvalue_t keyvalue_find (keyvalue_t list, const char *key);
 const char *keyvalue_get (keyvalue_t list, const char *key);
