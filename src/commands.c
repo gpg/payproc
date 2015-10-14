@@ -1074,6 +1074,7 @@ static struct
 {
   const char *name;
   gpg_error_t (*handler)(conn_t conn, char *args);
+  int admin_required;
 } cmdtbl[] =
   {
     { "SESSION",        cmd_session },
@@ -1085,8 +1086,8 @@ static struct
     { "PPIPNHD",        cmd_ppipnhd },
     { "GETINFO",        cmd_getinfo },
     { "PING",           cmd_ping },
-    { "COMMITPREORDER", cmd_commitpreorder },
-    { "GETPREORDER",    cmd_getpreorder },
+    { "COMMITPREORDER", cmd_commitpreorder, 1 },
+    { "GETPREORDER",    cmd_getpreorder, 1 },
     { "HELP",           cmd_help },
     { NULL, NULL}
   };
@@ -1108,14 +1109,15 @@ cmd_help (conn_t conn, char *args)
 }
 
 
-/* The handler serving a connection. */
+/* The handler serving a connection.  UID is the UID of the client. */
 void
-connection_handler (conn_t conn)
+connection_handler (conn_t conn, uid_t uid)
 {
   gpg_error_t err;
   keyvalue_t kv;
   int cmdidx;
   char *cmdargs;
+  int i;
 
   conn->stream = es_fdopen_nc (conn->fd, "r+,samethread");
   if (!conn->stream)
@@ -1135,23 +1137,53 @@ connection_handler (conn_t conn)
     }
   es_fflush (conn->stream);
 
-  cmdargs = NULL;
-  for (cmdidx=0; cmdtbl[cmdidx].name; cmdidx++)
-    if ((cmdargs = has_leading_keyword (conn->command, cmdtbl[cmdidx].name)))
-      break;
-  if (cmdargs)
+  err = 0;
+  if (opt.n_allowed_uids)
     {
-      err = cmdtbl[cmdidx].handler (conn, cmdargs);
+      for (i=0; i < opt.n_allowed_uids; i++)
+        if (opt.allowed_uids[i] == uid)
+          break;
+      if (!(i < opt.n_allowed_uids))
+        {
+          err = gpg_error (GPG_ERR_EPERM);
+          es_fprintf (conn->stream, "ERR %u (User not allowed)\n", err);
+        }
     }
-  else
+
+  if (!err)
     {
-      es_fprintf (conn->stream, "ERR 1 (Unknown command)\n");
-      es_fprintf (conn->stream, "_cmd: %s\n", conn->command);
-      for (kv = conn->dataitems; kv; kv = kv->next)
-        es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
+      cmdargs = NULL;
+      for (cmdidx=0; cmdtbl[cmdidx].name; cmdidx++)
+        if ((cmdargs=has_leading_keyword (conn->command, cmdtbl[cmdidx].name)))
+          break;
+      if (cmdargs)
+        {
+          err = 0;
+          if (cmdtbl[cmdidx].admin_required)
+            {
+              for (i=0; i < opt.n_allowed_admin_uids; i++)
+                if (opt.allowed_admin_uids[i] == uid)
+                  break;
+              if (!(i < opt.n_allowed_admin_uids))
+                {
+                  err = gpg_error (GPG_ERR_FORBIDDEN);
+                  es_fprintf (conn->stream,
+                              "ERR %u (User is not an admin)\n", err);
+                }
+            }
+
+          if (!err)
+            err = cmdtbl[cmdidx].handler (conn, cmdargs);
+        }
+      else
+        {
+          es_fprintf (conn->stream, "ERR 1 (Unknown command)\n");
+          es_fprintf (conn->stream, "_cmd: %s\n", conn->command);
+          for (kv = conn->dataitems; kv; kv = kv->next)
+            es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
+        }
     }
 
   if (conn->stream)
     es_fprintf (conn->stream, "\n");
-
 }

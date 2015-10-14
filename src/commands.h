@@ -20,6 +20,8 @@
 #ifndef COMMANDS_H
 #define COMMANDS_H
 
+#include <sys/types.h>
+
 struct conn_s;
 typedef struct conn_s *conn_t;
 
@@ -31,7 +33,7 @@ void release_connection_obj (conn_t conn);
 unsigned int id_from_connection_obj (conn_t conn);
 int fd_from_connection_obj (conn_t conn);
 
-void connection_handler (conn_t conn);
+void connection_handler (conn_t conn, uid_t uid);
 
 
 #endif /*COMMANDS_H*/

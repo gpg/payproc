@@ -31,6 +31,7 @@
 #include <gpg-error.h>
 #include <npth.h>
 #include <gcrypt.h>
+#include <pwd.h>
 
 #include "util.h"
 #include "logging.h"
@@ -183,6 +184,63 @@ set_account_key (const char *fname, int service)
 }
 
 
+/* Add the UID taken from STRING to the list of allowed clients.  if
+   ALSO_ADMIN is set, add that uid also to the list of allowed admin
+   users.  */
+static void
+add_allowed_uid (const char *string, int also_admin)
+{
+  char *buffer;
+  const char *s;
+  struct passwd *pw;
+  uid_t uid;
+
+  buffer = xstrdup (string);
+  trim_spaces (buffer);
+  string = buffer;
+  if (!*buffer)
+    {
+      xfree (buffer);
+      return;  /* Ignore empty strings.  */
+    }
+  for (s=string; digitp (s); s++)
+    ;
+  if (!*s)
+    {
+      uid = strtoul (string, NULL, 10);
+      pw = getpwuid (uid);
+      if (pw && pw->pw_uid != uid)
+        pw = NULL;
+    }
+  else
+    pw = getpwnam (string);
+
+  if (!pw)
+    {
+      log_error ("no such user '%s'\n", string);
+      xfree (buffer);
+      return;
+    }
+  uid = pw->pw_uid;
+
+  if (opt.n_allowed_uids >= DIM (opt.allowed_uids))
+    {
+      log_error ("can't add user '%s': Table full\n", string);
+      xfree (buffer);
+      return;
+    }
+  if (also_admin && opt.n_allowed_admin_uids >= DIM (opt.allowed_admin_uids))
+    {
+      log_error ("can't add admin user '%s': Table full\n", string);
+      xfree (buffer);
+      return;
+    }
+  opt.allowed_uids[opt.n_allowed_uids++] = uid;
+  if (also_admin)
+    opt.allowed_admin_uids[opt.n_allowed_admin_uids++] = uid;
+}
+
+
 /* This callback is used by the log functions to return an identifier
    for the current thread.  */
 static int
@@ -261,9 +319,9 @@ main (int argc, char **argv)
         case oNoDetach: opt.nodetach = 1; break;
         case oLogFile:  logfile = pargs.r.ret_str; break;
         case oJournal:  jrnl_set_file (pargs.r.ret_str); break;
-        case oAllowUID: /*FIXME*/ break;
+        case oAllowUID: add_allowed_uid (pargs.r.ret_str, 0); break;
         case oAllowGID: /*FIXME*/ break;
-        case oAdminUID: /*FIXME*/ break;
+        case oAdminUID: add_allowed_uid (pargs.r.ret_str, 1); break;
         case oAdminGID: /*FIXME*/ break;
         case oStripeKey: set_account_key (pargs.r.ret_str, 1); break;
         case oPaypalKey: set_account_key (pargs.r.ret_str, 2); break;
@@ -283,6 +341,22 @@ main (int argc, char **argv)
 
   if (log_get_errorcount (0))
     exit (2);
+
+  if (opt.verbose)
+    {
+      int i, j, star;
+
+      log_info ("Allowed users:");
+      for (i=0; i < opt.n_allowed_uids; i++)
+        {
+          for (j=star=0; j < opt.n_allowed_admin_uids && !star; j++)
+            if (opt.allowed_admin_uids[j] == opt.allowed_uids[i])
+              star = 1;
+          log_printf (" %lu%s", (unsigned long)opt.allowed_uids[i],
+                      star? "*":"");
+        }
+      log_printf ("\n");
+    }
 
   /* Start the server.  */
   launch_server (logfile);
@@ -825,7 +899,7 @@ connection_thread (void *arg)
     log_info ("new connection - pid=%u uid=%u gid=%u\n",
               (unsigned int)pid, (unsigned int)uid, (unsigned int)gid);
 
-  connection_handler (conn);
+  connection_handler (conn, uid);
 
   if (opt.verbose)
     log_info ("connection terminated\n");

@@ -20,6 +20,8 @@
 #ifndef PAYPROCD_H
 #define PAYPROCD_H
 
+#include <sys/types.h>
+
 
 /* The global options.  */
 struct
@@ -30,6 +32,14 @@ struct
   int livemode;  /* Expect to be in live mode.  Default is test mode.  */
   char *stripe_secret_key;  /* The secret key for stripe.com */
   char *paypal_secret_key;  /* The secret key for PayPal */
+
+  /* The count and the list of clients allowed to use the service.  */
+  int n_allowed_uids;
+  uid_t allowed_uids[20];
+
+  /* The count and the list of clients allowed to use admin services.  */
+  int n_allowed_admin_uids;
+  uid_t allowed_admin_uids[20];
 
 } opt;
 

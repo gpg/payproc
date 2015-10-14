@@ -3,6 +3,12 @@
 Noteworthy changes in version 0.3.0 (unreleased)
 ------------------------------------------------
 
+ * Support for SEPA payments
+
+ * New tool payproc-post.
+
+ * Allow access restrictions by user ids.
+
 
 Noteworthy changes in version 0.2.1 (2014-09-09)
 ------------------------------------------------
