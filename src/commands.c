@@ -136,17 +136,10 @@ id_from_connection_obj (conn_t conn)
 
 
 static void
-write_data_line (keyvalue_t kv, estream_t fp)
+write_data_value (const char *value, estream_t fp)
 {
-  const char *value;
-
-  if (!kv)
-    return;
-  value = kv->value;
   if (!value)
-    return;
-  es_fputs (kv->name, fp);
-  es_fputs (": ", fp);
+    value = "";
   for ( ; *value; value++)
     {
       if (*value == '\n')
@@ -158,6 +151,21 @@ write_data_line (keyvalue_t kv, estream_t fp)
         es_putc (*value, fp);
     }
   es_putc ('\n', fp);
+}
+
+static void
+write_data_line (keyvalue_t kv, estream_t fp)
+{
+  const char *value;
+
+  if (!kv)
+    return;
+  value = kv->value;
+  if (!value)
+    return;
+  es_fputs (kv->name, fp);
+  es_fputs (": ", fp);
+  write_data_value (value, fp);
 }
 
 
@@ -908,6 +916,55 @@ cmd_getpreorder (conn_t conn, char *args)
 }
 
 
+/* The LISTPREORDER command retrieves a record from the preorder table.
+
+   Refnn:      The reference suffix (-NN).  If this is not given all
+               records are listed in reverse chronological order.
+
+   On success these items are returned:
+
+   Count:      Number of records
+   D[n]:       A formatted line with the data.  N starts at 0.
+
+ */
+static gpg_error_t
+cmd_listpreorder (conn_t conn, char *args)
+{
+  gpg_error_t err;
+  char *buf = NULL;
+  unsigned int n, count;
+  char key[30];
+
+  (void)args;
+
+  err = preorder_list_records (&conn->dataitems, &count);
+
+  if (err)
+    {
+      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
+                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_data_line (keyvalue_find (conn->dataitems, "failure"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
+                       conn->stream);
+    }
+  else
+    {
+      es_fprintf (conn->stream, "OK\nCount: %u\n", count);
+      for (n=0; n < count; n++)
+        {
+          snprintf (key, sizeof key, "D[%u]", n);
+          es_fprintf (conn->stream, "%s: ", key);
+          write_data_value (keyvalue_get_string (conn->dataitems, key),
+                            conn->stream);
+        }
+    }
+
+  es_free (buf);
+  return err;
+}
+
+
 
 /* The CHECKAMOUNT command checks whether a given amount is within the
    configured limits for payment.  It may eventually provide
@@ -1088,6 +1145,7 @@ static struct
     { "PING",           cmd_ping },
     { "COMMITPREORDER", cmd_commitpreorder, 1 },
     { "GETPREORDER",    cmd_getpreorder, 1 },
+    { "LISTPREORDER",   cmd_listpreorder, 1 },
     { "HELP",           cmd_help },
     { NULL, NULL}
   };

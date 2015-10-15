@@ -59,7 +59,8 @@
 #include "util.h"
 #include "logging.h"
 #include "payprocd.h"
-#include "journal.h"  /* Temporary for meta_field_to_string.  */
+#include "journal.h"
+#include "membuf.h"
 #include "preorder.h"
 
 
@@ -498,6 +499,77 @@ get_columns (sqlite3_stmt *stmt, int idx, keyvalue_t *dictp)
 }
 
 
+/* Format columns and put the formatted line into DICTP under the
+   key "D[idx]".  */
+static gpg_error_t
+format_columns (sqlite3_stmt *stmt, int idx, keyvalue_t *dictp)
+{
+  gpg_error_t err;
+  membuf_t mb;
+  const char *s;
+  int i;
+
+  init_membuf (&mb, 512);
+
+  s = sqlite3_column_text (stmt, 0);
+  if (!s && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+    {
+      err = gpg_error (GPG_ERR_ENOMEM);
+      goto leave;
+    }
+
+  i = sqlite3_column_int (stmt, 1);
+  if (!i && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+    {
+      err = gpg_error (GPG_ERR_ENOMEM);
+      goto leave;
+    }
+  put_membuf_printf (&mb, "|%s-%02d", s, i);
+
+  for (i = 2; i <= 9; i++)
+    {
+      put_membuf_chr (&mb, '|');
+      s = sqlite3_column_text (stmt, i);
+      if (!s && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+        {
+          err = gpg_error (GPG_ERR_ENOMEM);
+          goto leave;
+        }
+      if (!s)
+        ;
+      else if (strchr (s, '|'))
+        {
+          for (; *s; s++)
+            if (*s == '|')
+              put_membuf_str (&mb, "=7C");
+            else
+              put_membuf_chr (&mb, *s);
+        }
+      else
+        put_membuf_str (&mb, s);
+    }
+  put_membuf_chr (&mb, '|');
+
+  {
+    char *p;
+
+    put_membuf_chr (&mb, 0);
+    p = get_membuf (&mb, NULL);
+    if (!p)
+      err = gpg_error_from_syserror ();
+    else
+      {
+        err = keyvalue_put_idx (dictp, "D", idx, p);
+        xfree (p);
+      }
+  }
+
+ leave:
+  xfree (get_membuf (&mb, NULL));
+  return err;
+}
+
+
 /* Get a record from the preorder table.  The values are stored at the
    dictionary at DICTP.  */
 static gpg_error_t
@@ -543,6 +615,69 @@ get_preorder_record (const char *ref, keyvalue_t *dictp)
         log_error ("error selecting from preorder table: %s [%s (%d)]\n",
                    gpg_strerror (err), sqlite3_errstr (res), res);
     }
+  return err;
+}
+
+
+/* List records from the preorder table.  The values are stored at the
+   dictionary at DICTP with a D[n] key.  The number of records is
+   stored at R_COUNT.  */
+static gpg_error_t
+list_preorder_records (const char *refnn,
+                       keyvalue_t *dictp, unsigned int *r_count)
+{
+  gpg_error_t err;
+  sqlite3_stmt *stmt;
+  int count = 0;
+  int res;
+
+  stmt = *refnn? preorder_selectrefnn_stmt : preorder_selectlist_stmt;
+
+  sqlite3_reset (stmt);
+
+  if (*refnn)
+    {
+      res = sqlite3_bind_text (stmt, 1, refnn, -1, SQLITE_TRANSIENT);
+      if (res)
+        {
+          log_error ("error binding a value for the preorder table: %s\n",
+                     sqlite3_errstr (res));
+          return gpg_error (GPG_ERR_GENERAL);
+        }
+    }
+
+ next:
+  res = sqlite3_step (stmt);
+  if (res == SQLITE_ROW)
+    {
+      res = SQLITE_OK;
+      err = format_columns (stmt, count, dictp);
+      if (!err)
+        {
+          if (++count)
+            goto next;
+          err = gpg_error (GPG_ERR_WOULD_WRAP);
+        }
+    }
+  else if (res == SQLITE_DONE)
+    {
+      res = SQLITE_OK;
+      err = 0;
+    }
+  else
+    err = gpg_error (GPG_ERR_GENERAL);
+
+  if (err)
+    {
+      if (res == SQLITE_OK)
+        log_error ("error selecting from preorder table: %s\n",
+                   gpg_strerror (err));
+      else
+        log_error ("error selecting from preorder table: %s [%s (%d)]\n",
+                   gpg_strerror (err), sqlite3_errstr (res), res);
+    }
+  else
+    *r_count = count;
   return err;
 }
 
@@ -611,7 +746,6 @@ preorder_store_record (keyvalue_t *dictp)
     return err;
 
   err = insert_preorder_record (dictp);
-
   close_preorder_db (0);
 
   return err;
@@ -642,6 +776,39 @@ preorder_get_record (keyvalue_t *dictp)
     return err;
 
   err = get_preorder_record (separef, dictp);
+
+  close_preorder_db (0);
+
+  return err;
+}
+
+
+/* Take the number Sepa-Ref from DICTP, fetch the row, and update DICTP with
+   that data.  On error return an error code.  Note that DICTP may
+   even be changed on error.  */
+gpg_error_t
+preorder_list_records (keyvalue_t *dictp, unsigned int *r_count)
+{
+  gpg_error_t err;
+  char refnn[3];
+  const char *s;
+
+  *r_count = 0;
+  s = keyvalue_get (*dictp, "Refnn");
+  if (s)
+    {
+      if (strlen (s) != 2)
+        return gpg_error (GPG_ERR_INV_LENGTH);
+      strcpy (refnn, s);
+    }
+  else
+    *refnn = 0;
+
+  err = open_preorder_db ();
+  if (err)
+    return err;
+
+  err = list_preorder_records (refnn, dictp, r_count);
 
   close_preorder_db (0);
 

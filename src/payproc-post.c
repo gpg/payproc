@@ -54,6 +54,7 @@ enum opt_values
     aPing,
     aSepaPreorder,
     aGetPreorder,
+    aListPreorder,
 
     oLast
   };
@@ -66,6 +67,7 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_c (aPing, "ping",  "Send a ping"),
   ARGPARSE_c (aSepaPreorder, "sepa-preorder",  "Insert a SEPA preorder"),
   ARGPARSE_c (aGetPreorder,  "get-preorder",   "Read one preorder"),
+  ARGPARSE_c (aListPreorder,  "list-preorder",  "List preorders"),
 
   ARGPARSE_group (301, "@\nOptions:\n "),
   ARGPARSE_s_n (oVerbose, "verbose",  "verbose diagnostics"),
@@ -87,6 +89,7 @@ static gpg_error_t send_request (const char *command,
                                  keyvalue_t indata, keyvalue_t *outdata);
 static void post_sepa (const char *refstring, const char *amountstr);
 static void getpreorder (const char *refstring);
+static void listpreorder (const char *refstring);
 static void sepapreorder (const char *amountstr, const char *name,
                           const char *email, const char *desc);
 
@@ -150,6 +153,7 @@ main (int argc, char **argv)
         case aPing:
         case aSepaPreorder:
         case aGetPreorder:
+        case aListPreorder:
           if (cmd && cmd != pargs.r_opt)
             {
               log_error ("conflicting commands\n");
@@ -190,6 +194,12 @@ main (int argc, char **argv)
         wrong_args ("--get-preorder REF");
       ascii_strupr (argv[0]);
       getpreorder (argv[0]);
+    }
+  else if (cmd == aListPreorder)
+    {
+      if (argc > 1)
+        wrong_args ("--list-preorder [NN]");
+      listpreorder (argc? argv[0] : NULL);
     }
   else if (cmd == aSepaPreorder)
     {
@@ -356,6 +366,76 @@ getpreorder (const char *refstring)
     {
       for (kv = output; kv; kv = kv->next)
         es_printf ("%s: %s\n", kv->name, kv->value);
+    }
+
+  keyvalue_release (input);
+  keyvalue_release (output);
+}
+
+
+static void
+listpreorder (const char *refstring)
+{
+  gpg_error_t err;
+  keyvalue_t input = NULL;
+  keyvalue_t output = NULL;
+  unsigned int n, count;
+  char key[30];
+  const char *s, *t;
+  char **tokens;
+  int i;
+  int len;
+
+  if (refstring)
+    {
+      err = keyvalue_put (&input, "Refnn", refstring);
+      if (err)
+        log_fatal ("keyvalue_put failed: %s\n", gpg_strerror (err));
+    }
+
+  if (!send_request ("LISTPREORDER", input, &output))
+    {
+      count = keyvalue_get_uint (output, "Count");
+      es_printf ("Number of records: %u\n", count);
+      for (n=0; n < count; n++)
+        {
+          snprintf (key, sizeof key, "D[%u]", n);
+          s = keyvalue_get_string (output, key);
+          tokens = strtokenize (*s=='|'? s+1:s, "|");
+          if (!tokens)
+            log_fatal ("strtokenize failed: %s\n",
+                       gpg_strerror (gpg_error_from_syserror ()));
+          es_putc ('|', es_stdout);
+          for (i=0; (s = tokens[i]); i++)
+            {
+              if (!*s && !tokens[i+1])
+                continue; /* Skip an empty last field.  */
+              switch (i)
+                {
+                case 1: /* Created.   */
+                case 2: /* Last Paid - print only date.  */
+                  es_printf (" %10.10s |", s );
+                  break;
+                case 4:
+                  t = strchr (s, '.');
+                  len = t? (t-s) : strlen (s);
+                  es_printf (" %3.*s |", len, s );
+                  break;
+                case 5: /* Always EUR - don't print.  */
+                  break;
+                case 6: /* Don't print the description.  */
+                  break;
+                case 7: /* Email */
+                  es_printf (" %-20s |", s );
+                  break;
+                default:
+                  es_printf (" %s |", s );
+                  break;
+                }
+            }
+          es_putc ('\n', es_stdout);
+          xfree (tokens);
+        }
     }
 
   keyvalue_release (input);
