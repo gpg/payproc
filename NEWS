@@ -1,13 +1,13 @@
       Payproc - The Payment Processor
 
-Noteworthy changes in version 0.3.0 (unreleased)
+Noteworthy changes in version 0.3.0 (2015-10-15)
 ------------------------------------------------
 
  * Support for SEPA payments
 
  * New tool payproc-post.
 
- * Allow access restrictions by user ids.
+ * Implement access restrictions via user ids.
 
 
 Noteworthy changes in version 0.2.1 (2014-09-09)

@@ -15,4 +15,14 @@ stamp in the journal is given in UTC.
 You should also add a cron job for the payproc user to run
 /usr/lib/payproc/geteuroxref each day at about 16:00 CET.
 
+To add access restrictions to certain user ids in addition to the file
+permissions of the communication socket, the options --allow-uids/-U
+and --admin-uid may be used.  The take an UID or a username as
+argument.  Setting an --admin-uid implicitly uses the uid for
+--allow-uid.  If any UID has been specified payprocd check all
+connections against this uids.  To use the admin-required commands
+--admin-uid must have been given.  Thus a common list of options is
+"-U www-data --admin-uid OPERATOR" to allow OPERATOR to make use of
+all features.
+
 See doc/api-ref.org for a description of supported commands.
