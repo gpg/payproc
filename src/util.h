@@ -124,6 +124,7 @@ const char *memstr (const void *buffer, size_t buflen, const char *sub);
 const char *memistr (const void *buffer, size_t buflen, const char *sub);
 int memicmp (const char *a, const char *b, size_t n);
 char *trim_spaces (char *str);
+char **strtokenize (const char *string, const char *delim);
 
 
 /* Object to store a key value pair.  */
@@ -152,6 +153,7 @@ const char *keyvalue_get (keyvalue_t list, const char *key);
 char *keyvalue_snatch (keyvalue_t list, const char *key);
 const char *keyvalue_get_string (keyvalue_t list, const char *key);
 int         keyvalue_get_int (keyvalue_t list, const char *key);
+unsigned int keyvalue_get_uint (keyvalue_t list, const char *key);
 
 gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data);
 
