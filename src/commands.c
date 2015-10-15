@@ -1122,6 +1122,18 @@ cmd_ping (conn_t conn, char *args)
   return 0;
 }
 
+/* Process a SHUTDOWN command.  */
+static gpg_error_t
+cmd_shutdown (conn_t conn, char *args)
+{
+  (void)args;
+
+  es_fputs ("OK terminating daemon\n", conn->stream);
+  shutdown_server ();
+
+  return 0;
+}
+
 
 
 static gpg_error_t cmd_help (conn_t conn, char *args);
@@ -1146,6 +1158,7 @@ static struct
     { "COMMITPREORDER", cmd_commitpreorder, 1 },
     { "GETPREORDER",    cmd_getpreorder, 1 },
     { "LISTPREORDER",   cmd_listpreorder, 1 },
+    { "SHUTDOWN",       cmd_shutdown, 1 },
     { "HELP",           cmd_help },
     { NULL, NULL}
   };

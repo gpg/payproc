@@ -44,5 +44,7 @@ struct
 } opt;
 
 
+void shutdown_server (void);
+
 
 #endif /*PAYPROCD_H*/

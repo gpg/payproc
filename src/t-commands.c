@@ -26,6 +26,12 @@
 
 #include "commands.c" /* The module under test.  */
 
+void
+shutdown_server (void)
+{
+  /* Dummy.  */
+}
+
 
 static void
 test_convert_amount (void)

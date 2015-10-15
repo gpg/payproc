@@ -50,8 +50,9 @@ enum opt_values
     oVerbose	= 'v',
 
     oSeparator  = 500,
-    aSepa,
     aPing,
+    aShutdown,
+    aSepa,
     aSepaPreorder,
     aGetPreorder,
     aListPreorder,
@@ -63,8 +64,9 @@ enum opt_values
 /* The list of commands and options. */
 static ARGPARSE_OPTS opts[] = {
   ARGPARSE_group (300, "@Commands:\n "),
-  ARGPARSE_c (aSepa, "sepa",  "Post a SEPA transaction (default)"),
   ARGPARSE_c (aPing, "ping",  "Send a ping"),
+  ARGPARSE_c (aShutdown,  "shutdown",       "Shutdown server"),
+  ARGPARSE_c (aSepa, "sepa",  "Post a SEPA transaction (default)"),
   ARGPARSE_c (aSepaPreorder, "sepa-preorder",  "Insert a SEPA preorder"),
   ARGPARSE_c (aGetPreorder,  "get-preorder",   "Read one preorder"),
   ARGPARSE_c (aListPreorder,  "list-preorder",  "List preorders"),
@@ -149,8 +151,9 @@ main (int argc, char **argv)
     {
       switch (pargs.r_opt)
         {
-        case aSepa:
         case aPing:
+        case aShutdown:
+        case aSepa:
         case aSepaPreorder:
         case aGetPreorder:
         case aListPreorder:
@@ -179,6 +182,13 @@ main (int argc, char **argv)
       keyvalue_t dict = NULL;
 
       send_request ("PING", NULL, &dict);
+      keyvalue_release (dict);
+    }
+  else if (cmd == aShutdown)
+    {
+      keyvalue_t dict = NULL;
+
+      send_request ("SHUTDOWN", NULL, &dict);
       keyvalue_release (dict);
     }
   else if (cmd == aSepa)

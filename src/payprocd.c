@@ -826,6 +826,13 @@ handle_tick (void)
 }
 
 
+void
+shutdown_server (void)
+{
+  kill (getpid(), SIGTERM);
+}
+
+
 /* The signal handler for payprocd.  It is expected to be run in its
    own thread and not in the context of a signal handler.  */
 static void
@@ -849,7 +856,7 @@ handle_signal (int signo)
         log_info ("SIGTERM received - shutting down ...\n");
       else
         log_info ("SIGTERM received - still %d open connections\n",
-		  active_connections);
+                  active_connections);
       shutdown_pending++;
       if (shutdown_pending > 2)
         {
@@ -895,6 +902,7 @@ connection_thread (void *arg)
       goto leave;
     }
 
+  active_connections++;
   if (opt.verbose)
     log_info ("new connection - pid=%u uid=%u gid=%u\n",
               (unsigned int)pid, (unsigned int)uid, (unsigned int)gid);
@@ -903,6 +911,7 @@ connection_thread (void *arg)
 
   if (opt.verbose)
     log_info ("connection terminated\n");
+  active_connections--;
 
  leave:
   release_connection_obj (conn);
