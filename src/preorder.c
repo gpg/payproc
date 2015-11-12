@@ -443,7 +443,7 @@ get_text_column (sqlite3_stmt *stmt, int idx, int icol, const char *name,
   if (!s && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
     err = gpg_error (GPG_ERR_ENOMEM);
   else if (!strcmp (name, "Meta"))
-    err = keyvalue_put_meta (dictp, s);
+    err = s? keyvalue_put_meta (dictp, s) : 0;
   else
     err = keyvalue_put_idx (dictp, name, idx, s);
 
