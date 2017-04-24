@@ -40,6 +40,7 @@
 /* Allow building standalone.  */
 #ifndef PAYPROCD_SOCKET_NAME
 #define PAYPROCD_SOCKET_NAME "/var/run/payproc/dameon"
+#define PAYPROCD_TEST_SOCKET_NAME "/var/run/payproc-test/dameon"
 #endif
 #ifndef PACKAGE_NAME
 #define PACKAGE_NAME "payproc"
@@ -165,7 +166,10 @@ main (int argc, char **argv)
   unsigned long length, n;
   char *buffer;
 
-  /* Allow the usual "--version" option only if run outside of the COI
+  /* FIXME: Figure out whether this is a test or a live version and
+   * adjust the socket accordingly.  */
+
+  /* Allow the usual "--version" option only if run outside of the CGI
      environment.  */
   if (argc > 1 && !strcmp (argv[1], "--version") && !request_method)
     {

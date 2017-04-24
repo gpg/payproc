@@ -75,6 +75,13 @@ test -z "$PAYPROCD_SOCKET_NAME" && PAYPROCD_SOCKET_NAME=/var/run/payproc/daemon
 AC_DEFINE_UNQUOTED([PAYPROCD_SOCKET_NAME], "$PAYPROCD_SOCKET_NAME",
                                     [Name of the socket to connect payprocd])
 
+AC_ARG_VAR([PAYPROCD_TEST_SOCKET_NAME],
+           [Name of the socket to connect the payprocd test instanace])dnl
+test -z "$PAYPROCD_TEST_SOCKET_NAME" \
+    && PAYPROCD_TEST_SOCKET_NAME=/var/run/payproc-test/daemon
+AC_DEFINE_UNQUOTED([PAYPROCD_TEST_SOCKET_NAME], "$PAYPROCD_TEST_SOCKET_NAME",
+                   [Name of the socket to connect a payprocd test intance])
+
 
 #
 # To avoid double inclusion of config.h which might happen at some

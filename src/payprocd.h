@@ -44,6 +44,8 @@ struct
 } opt;
 
 
+const char *server_socket_name (void);
+
 void shutdown_server (void);
 
 

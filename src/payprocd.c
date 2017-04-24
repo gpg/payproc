@@ -79,6 +79,7 @@ enum opt_values
     oStripeKey,
     oPaypalKey,
     oLive,
+    oTest,
     oAdminUID,
     oAdminGID,
 
@@ -103,6 +104,7 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_s_s (oPaypalKey,
                 "paypal-key", "|FILE|read key for PayPal account from FILE"),
   ARGPARSE_s_n (oLive, "live",  "enable live mode"),
+  ARGPARSE_s_n (oTest, "test",  "@"),
 
   ARGPARSE_end ()
 };
@@ -264,6 +266,7 @@ main (int argc, char **argv)
 {
   ARGPARSE_ARGS pargs;
   const char *logfile = NULL;
+  int live_or_test = 0;
 
   /* Set program name etc.  */
   set_strusage (my_strusage);
@@ -325,10 +328,16 @@ main (int argc, char **argv)
         case oAdminGID: /*FIXME*/ break;
         case oStripeKey: set_account_key (pargs.r.ret_str, 1); break;
         case oPaypalKey: set_account_key (pargs.r.ret_str, 2); break;
-        case oLive: opt.livemode = 1; break;
+        case oLive: opt.livemode = 1; live_or_test = 1; break;
+        case oTest: opt.livemode = 0; live_or_test = 1; break;
 
         default: pargs.err = ARGPARSE_PRINT_ERROR; break;
 	}
+    }
+
+  if (!live_or_test)
+    {
+      log_info ("implicitly using --test\n");
     }
 
   if (opt.livemode && (!opt.stripe_secret_key
@@ -346,6 +355,9 @@ main (int argc, char **argv)
     {
       int i, j, star;
 
+      log_info ("Mode: %s\n", opt.livemode? "live" : "test");
+      log_info ("Stripe key: %s\n", opt.stripe_secret_key? "yes":"no");
+      log_info ("Paypal key: %s\n", opt.paypal_secret_key? "yes":"no");
       log_info ("Allowed users:");
       for (i=0; i < opt.n_allowed_uids; i++)
         {
@@ -376,7 +388,7 @@ cleanup (void)
   done = 1;
 
   if (remove_socket_flag)
-    remove (PAYPROCD_SOCKET_NAME);
+    remove (server_socket_name ());
 }
 
 
@@ -447,7 +459,7 @@ already_running_p (const char *name)
 /* Create a Unix domain socket with NAME.  Returns the file descriptor
    or terminates the process in case of an error.  */
 static int
-create_socket (char *name)
+create_socket (const char *name)
 {
   struct sockaddr_un *serv_addr;
   socklen_t len;
@@ -518,7 +530,7 @@ launch_server (const char *logfile)
   int fd;
   pid_t pid;
 
-  fd = create_socket (PAYPROCD_SOCKET_NAME);
+  fd = create_socket (server_socket_name ());
   fflush (NULL);
   pid = fork ();
   if (pid == (pid_t)-1)
@@ -823,6 +835,14 @@ handle_tick (void)
           npth_attr_destroy (&tattr);
         }
     }
+}
+
+
+/* Return the name of the socket.  */
+const char *
+server_socket_name (void)
+{
+  return opt.livemode? PAYPROCD_SOCKET_NAME : PAYPROCD_TEST_SOCKET_NAME;
 }
 
 

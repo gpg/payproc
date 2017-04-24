@@ -57,6 +57,9 @@ enum opt_values
     aGetPreorder,
     aListPreorder,
 
+    oLive,
+    oTest,
+
     oLast
   };
 
@@ -73,6 +76,8 @@ static ARGPARSE_OPTS opts[] = {
 
   ARGPARSE_group (301, "@\nOptions:\n "),
   ARGPARSE_s_n (oVerbose, "verbose",  "verbose diagnostics"),
+  ARGPARSE_s_n (oLive, "live",  "enable live mode"),
+  ARGPARSE_s_n (oTest, "test",  "enable test mode"),
 
   ARGPARSE_end ()
 };
@@ -81,6 +86,7 @@ static ARGPARSE_OPTS opts[] = {
 static struct
 {
   int verbose;
+  int livemode;
 
 } opt;
 
@@ -135,6 +141,7 @@ main (int argc, char **argv)
 {
   ARGPARSE_ARGS pargs;
   enum opt_values cmd = 0;
+  int live_or_test = 0;
 
   /* Set program name etc.  */
   set_strusage (my_strusage);
@@ -166,6 +173,8 @@ main (int argc, char **argv)
           break;
 
         case oVerbose: opt.verbose++; break;
+        case oLive: opt.livemode = 1; live_or_test = 1; break;
+        case oTest: opt.livemode = 0; live_or_test = 1; break;
 
         default: pargs.err = ARGPARSE_PRINT_ERROR; break;
 	}
@@ -176,6 +185,11 @@ main (int argc, char **argv)
 
   if (!cmd)
     cmd = aSepa; /* Set default.  */
+
+  if (!live_or_test)
+    {
+      log_info ("implicitly using --test\n");
+    }
 
   if (cmd == aPing)
     {
@@ -287,7 +301,8 @@ send_request (const char *command, keyvalue_t indata, keyvalue_t *outdata)
   keyvalue_t kv;
   const char *s;
 
-  fp = connect_daemon (PAYPROCD_SOCKET_NAME);
+  fp = connect_daemon (opt.livemode? PAYPROCD_SOCKET_NAME
+                       /**/        : PAYPROCD_TEST_SOCKET_NAME);
   if (!fp)
     {
       err = gpg_error_from_syserror ();

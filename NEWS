@@ -1,5 +1,12 @@
       Payproc - The Payment Processor
 
+Noteworthy changes in version 0.4.0 (unreleased)
+------------------------------------------------
+
+ * Support for an explicit test mode so that a second daemon can be
+   run in test mode.
+
+
 Noteworthy changes in version 0.3.0 (2015-10-15)
 ------------------------------------------------
 
