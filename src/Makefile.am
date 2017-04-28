@@ -62,10 +62,10 @@ payprocd_SOURCES = \
 	$(common_headers) \
 	$(utility_sources)
 payprocd_CFLAGS = $(GPG_ERROR_CFLAGS) $(NPTH_CFLAGS) $(LIBGCRYPT_CFLAGS) \
-                  $(LIBGNUTLS_CFLAGS) $(SQLITE3_CFLAGS)
+                  $(LIBGNUTLS_CFLAGS) $(SQLITE3_CFLAGS) $(GPGME_CFLAGS)
 payprocd_LDADD = -lm libcommonpth.a \
                   $(GPG_ERROR_LIBS) $(NPTH_LIBS) $(LIBGCRYPT_LIBS) \
-                  $(LIBGNUTLS_LIBS) $(SQLITE3_LIBS)
+                  $(LIBGNUTLS_LIBS) $(SQLITE3_LIBS) $(GPGME_LIBS)
 
 payproc_jrnl_SOURCES = \
         payproc-jrnl.c \

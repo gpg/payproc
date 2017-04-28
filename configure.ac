@@ -55,6 +55,10 @@ NEED_LIBGCRYPT_VERSION=1.6.0
 
 NEED_GNUTLS_VERSION=3.0
 
+NEED_GPGME_API=1
+NEED_GPGME_VERSION=1.9.0
+
+
 development_version=mym4_isgit
 
 AC_CONFIG_AUX_DIR(build-aux)
@@ -69,6 +73,8 @@ AC_DEFINE_UNQUOTED(PACKAGE_BUGREPORT, "$PACKAGE_BUGREPORT",
                                         [Bug report address])
 AC_DEFINE_UNQUOTED(NEED_LIBGCRYPT_VERSION, "$NEED_LIBGCRYPT_VERSION",
                                        [Required version of Libgcrypt])
+AC_DEFINE_UNQUOTED(NEED_GPGME_VERSION, "$NEED_GPGME_VERSION",
+                                       [Required version of GPGME])
 
 AC_ARG_VAR([PAYPROCD_SOCKET_NAME], [Name of the socket to connect payprocd])dnl
 test -z "$PAYPROCD_SOCKET_NAME" && PAYPROCD_SOCKET_NAME=/var/run/payproc/daemon
@@ -212,6 +218,13 @@ else
 ***
 *** $tmp]])
 fi
+
+
+#
+# GPGME
+#
+AM_PATH_GPGME("$NEED_GPGME_API:$NEED_GPGME_VERSION",
+              have_gpgme=yes,have_gpgme=no)
 
 
 AC_MSG_NOTICE([checking for networking options])
@@ -446,6 +459,15 @@ if test "$have_sqlite3" = "no"; then
    AC_MSG_NOTICE([[
 ***
 *** You need SQLite3 to build this program.
+***]])
+fi
+if test "$have_gpgme" = "no"; then
+   die=yes
+   AC_MSG_NOTICE([[
+***
+*** You need gpgme to build this program.
+*** (at least version $NEED_GPGME_VERSION is required.)
+*** See https://gnupg.org/software/gpgme
 ***]])
 fi
 

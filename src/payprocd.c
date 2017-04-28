@@ -32,6 +32,8 @@
 #include <npth.h>
 #include <gcrypt.h>
 #include <pwd.h>
+#include <locale.h>  /*(for gpgme)*/
+#include <gpgme.h>
 
 #include "util.h"
 #include "logging.h"
@@ -309,6 +311,16 @@ main (int argc, char **argv)
 
   /* Initialze processing subsystems.  */
   init_tls_subsystem ();
+
+  /* Init GPGME.  */
+  setlocale (LC_ALL, "");
+  if (!gpgme_check_version (NEED_GPGME_VERSION))
+    log_fatal ("%s is too old (need %s, have %s)\n", "gpgme",
+               NEED_GPGME_VERSION, gpgme_check_version (NULL));
+  gpgme_set_locale (NULL, LC_CTYPE, setlocale (LC_CTYPE, NULL));
+#ifdef LC_MESSAGES
+  gpgme_set_locale (NULL, LC_MESSAGES, setlocale (LC_MESSAGES, NULL));
+#endif
 
   /* Parse the command line. */
   pargs.argc  = &argc;
