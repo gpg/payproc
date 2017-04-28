@@ -69,6 +69,7 @@
 
 /* The name of the preorder database file.  */
 static const char preorder_db_fname[] = "/var/lib/payproc/preorder.db";
+static const char preorder_test_db_fname[] = "/var/lib/payproc-test/preorder.db";
 
 /* The database handle used for the preorder database.  This handle
    may only used after a successful open_preorder_db call and not
@@ -216,6 +217,7 @@ open_preorder_db (void)
 {
   int res;
   sqlite3_stmt *stmt;
+  const char *db_fname = opt.livemode? preorder_db_fname:preorder_test_db_fname;
 
   res = npth_mutex_lock (&preorder_db_lock);
   if (res)
@@ -229,7 +231,7 @@ open_preorder_db (void)
      our own locking instead of the more complex serialization sqlite
      would have to do. */
 
-  res = sqlite3_open_v2 (preorder_db_fname,
+  res = sqlite3_open_v2 (db_fname,
                          &preorder_db,
                          (SQLITE_OPEN_READWRITE
                           | SQLITE_OPEN_CREATE
@@ -238,7 +240,7 @@ open_preorder_db (void)
   if (res)
     {
       log_error ("error opening '%s': %s\n",
-                 preorder_db_fname, sqlite3_errstr (res));
+                 db_fname, sqlite3_errstr (res));
       close_preorder_db (1);
       return gpg_error (GPG_ERR_GENERAL);
     }
