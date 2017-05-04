@@ -91,6 +91,8 @@ enum opt_values
     oTest,
     oAdminUID,
     oAdminGID,
+    oDatabaseKey,
+    oBackofficeKey,
 
     oLast
   };
@@ -117,6 +119,10 @@ static ARGPARSE_OPTS opts[] = {
                 "stripe-key", "|FILE|read key for Stripe account from FILE"),
   ARGPARSE_s_s (oPaypalKey,
                 "paypal-key", "|FILE|read key for PayPal account from FILE"),
+  ARGPARSE_s_s (oDatabaseKey,
+                "database-key", "|FPR|secret key for the database"),
+  ARGPARSE_s_s (oBackofficeKey,
+                "backoffice-key", "|FPR|public key for the backoffice"),
 
   ARGPARSE_end ()
 };
@@ -126,6 +132,7 @@ static ARGPARSE_OPTS opts[] = {
 
 /* Local prototypes.  */
 static void cleanup (void);
+static void check_openpgp_keys (void);
 static void launch_server (void);
 static void server_loop (int fd);
 static void handle_tick (void);
@@ -357,6 +364,15 @@ parse_options (int argc, char **argv)
         case oLive: opt.livemode = 1; live_or_test = 1; break;
         case oTest: opt.livemode = 0; live_or_test = 1; break;
 
+        case oDatabaseKey:
+          xfree (opt.database_key_fpr);
+          opt.database_key_fpr = xstrdup (pargs.r.ret_str);
+          break;
+        case oBackofficeKey:
+          xfree (opt.backoffice_key_fpr);
+          opt.backoffice_key_fpr = xstrdup (pargs.r.ret_str);
+          break;
+
         case oConfig:
           if (!configfp)
             {
@@ -379,6 +395,9 @@ parse_options (int argc, char **argv)
       configname = NULL;
       goto next_pass;
     }
+
+  if (argc)
+    usage (1);
 
   if (!live_or_test)
     log_info ("implicitly using --test\n");
@@ -450,6 +469,8 @@ main (int argc, char **argv)
            && !strncmp (opt.stripe_secret_key, "sk_live_", 8))
     log_error ("test mode requested but live key given\n");
 
+  check_openpgp_keys ();
+
   if (log_get_errorcount (0))
     exit (2);
 
@@ -484,6 +505,7 @@ static void
 cleanup (void)
 {
   static int done;
+  char *p;
 
   if (done)
     return;
@@ -491,6 +513,63 @@ cleanup (void)
 
   if (remove_socket_flag)
     remove (server_socket_name ());
+
+  p = opt.database_key_fpr;
+  opt.database_key_fpr = NULL;
+  xfree (p);
+  p = opt.backoffice_key_fpr;
+  opt.backoffice_key_fpr = NULL;
+  xfree (p);
+}
+
+
+/* Check that the required OpenPGP keys are available.  */
+static void
+check_openpgp_keys (void)
+{
+  gpg_error_t err;
+  gpgme_ctx_t ctx = NULL;
+  gpgme_key_t key = NULL;
+
+  err = gpgme_new (&ctx);
+  if (err)
+    {
+      log_error ("error allocating a GPGME context: %s\n", gpg_strerror (err));
+      goto leave;
+    }
+
+  err = gpgme_set_protocol (ctx, GPGME_PROTOCOL_OPENPGP);
+  if (err)
+    {
+      log_error ("error requesting the OpenPGP protocol: %s\n",
+                 gpg_strerror (err));
+      goto leave;
+    }
+
+  /* Fixme: Replace gpgme_get_key by regualr key listing fucntions or
+   * better do a test encryption.  */
+  err = gpgme_get_key (ctx, opt.database_key_fpr, &key, 1);
+  if (err)
+    log_error ("error getting database key '%s': %s\n",
+               opt.database_key_fpr, gpg_strerror (err));
+  else if (!key || !key->can_encrypt || !key->secret)
+    log_error ("database key '%s' is not usable\n",
+               opt.database_key_fpr);
+
+  gpgme_key_unref (key);
+  key = NULL;
+  err = gpgme_get_key (ctx, opt.backoffice_key_fpr, &key, 0);
+  if (err)
+    log_error ("error getting backoffice key '%s': %s\n",
+               opt.backoffice_key_fpr, gpg_strerror (err));
+  else if (!key || !key->can_encrypt)
+    log_error ("backoffice key '%s' is not usable\n",
+               opt.backoffice_key_fpr);
+
+
+ leave:
+  gpgme_key_unref (key);
+  gpgme_release (ctx);
 }
 
 

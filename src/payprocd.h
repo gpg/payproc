@@ -33,6 +33,13 @@ struct
   char *stripe_secret_key;  /* The secret key for stripe.com */
   char *paypal_secret_key;  /* The secret key for PayPal */
 
+  /* The fingerprint of the OpenPGP key used to encrypt items in the
+   * database.  A secret and a public key is required.  */
+  char *database_key_fpr;
+  /* The fingerprint of the OpenPGP key used to encrypt data for use
+   * by the backoffice.  Only the public key is required.  */
+  char *backoffice_key_fpr;
+
   /* The count and the list of clients allowed to use the service.  */
   int n_allowed_uids;
   uid_t allowed_uids[20];
