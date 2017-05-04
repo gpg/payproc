@@ -66,6 +66,10 @@ static int active_connections;
 /* The thread specific data key.  */
 static npth_key_t my_tsd_key;
 
+/* The log file.  */
+static const char *logfile;
+
+
 
 /* Constants to identify the options. */
 enum opt_values
@@ -74,8 +78,11 @@ enum opt_values
     oVerbose	= 'v',
     oAllowUID   = 'U',
     oAllowGID   = 'G',
+    oConfig     = 'C',
 
-    oLogFile   = 500,
+    oNoConfig   = 500,
+    oLogFile,
+    oNoLogFile,
     oNoDetach,
     oJournal,
     oStripeKey,
@@ -93,9 +100,14 @@ enum opt_values
 static ARGPARSE_OPTS opts[] = {
   ARGPARSE_group (301, "@Options:\n "),
 
+  ARGPARSE_s_n (oLive,     "live",      "enable live mode"),
+  ARGPARSE_s_n (oTest,     "test",      "enable test mode"),
   ARGPARSE_s_n (oVerbose,  "verbose",   "verbose"),
-  ARGPARSE_s_n (oNoDetach, "no-detach", "do not detach from the console"),
+  ARGPARSE_s_s (oConfig,   "config",    "|FILE|read config from FILE"),
+  ARGPARSE_s_n (oNoConfig, "no-config", "ignore default config file"),
+  ARGPARSE_s_n (oNoDetach, "no-detach", "run in foreground"),
   ARGPARSE_s_s (oLogFile,  "log-file",  "|FILE|write log output to FILE"),
+  ARGPARSE_s_n (oNoLogFile,"no-log-file", "@"),
   ARGPARSE_s_s (oAllowUID, "allow-uid", "|N|allow access from uid N"),
   ARGPARSE_s_s (oAllowGID, "allow-gid", "|N|allow access from gid N"),
   ARGPARSE_s_s (oAdminUID, "admin-uid", "|N|allow admin access from uid N"),
@@ -105,8 +117,6 @@ static ARGPARSE_OPTS opts[] = {
                 "stripe-key", "|FILE|read key for Stripe account from FILE"),
   ARGPARSE_s_s (oPaypalKey,
                 "paypal-key", "|FILE|read key for PayPal account from FILE"),
-  ARGPARSE_s_n (oLive, "live",  "enable live mode"),
-  ARGPARSE_s_n (oTest, "test",  "@"),
 
   ARGPARSE_end ()
 };
@@ -116,7 +126,7 @@ static ARGPARSE_OPTS opts[] = {
 
 /* Local prototypes.  */
 static void cleanup (void);
-static void launch_server (const char *logfile);
+static void launch_server (void);
 static void server_loop (int fd);
 static void handle_tick (void);
 static void handle_signal (int signo);
@@ -263,13 +273,121 @@ pid_suffix_callback (unsigned long *r_suffix)
 }
 
 
+/* The config and command line option parser.  */
+static void
+parse_options (int argc, char **argv)
+{
+  ARGPARSE_ARGS pargs;
+  int orig_argc;
+  char **orig_argv;
+  int default_config = 1;
+  const char *configname = NULL;
+  unsigned int configlineno;
+  FILE *configfp = NULL;
+  int live_or_test = 0;
+
+  /* First check whether we have a config file on the commandline.  We
+   * also check for the --test and --live flag to decide on the
+   * default config name.  */
+  orig_argc = argc;
+  orig_argv = argv;
+  pargs.argc = &argc;
+  pargs.argv = &argv;
+  pargs.flags= ARGPARSE_FLAG_KEEP | ARGPARSE_FLAG_NOVERSION;
+  while (arg_parse (&pargs, opts))
+    {
+      switch (pargs.r_opt)
+        {
+        case oConfig:
+        case oNoConfig:
+          default_config = 0; /* Do not use the default config.  */
+          break;
+        case oLive: opt.livemode = 1; break;
+        case oTest: opt.livemode = 0; break;
+        default: break;
+        }
+    }
+
+  if (default_config)
+    configname = (opt.livemode? "/etc/payproc/payprocd.conf"
+                  /**/        : "/etc/payproc-test/payprocd.conf");
+  opt.livemode = 0;
+
+  /* Parse the option file and the command line. */
+  argc        = orig_argc;
+  argv        = orig_argv;
+  pargs.argc  = &argc;
+  pargs.argv  = &argv;
+  pargs.flags = ARGPARSE_FLAG_KEEP;
+ next_pass:
+  if (configname)
+    {
+      configlineno = 0;
+      configfp = fopen (configname, "r");
+      if (!configfp)
+        {
+          if (default_config)
+            log_info ("note: default config file '%s': %s\n",
+                      configname, strerror (errno));
+          else
+            {
+              log_error ("error opening config file '%s': %s\n",
+                         configname, strerror (errno));
+              exit (2);
+            }
+          configname = NULL;
+          default_config = 0;
+        }
+    }
+  while (optfile_parse (configfp, configname, &configlineno, &pargs, opts))
+    {
+      switch (pargs.r_opt)
+        {
+        case oVerbose:  opt.verbose++; break;
+        case oNoDetach: opt.nodetach = 1; break;
+        case oLogFile:  logfile = pargs.r.ret_str; break;
+        case oNoLogFile: logfile = NULL; break;
+        case oJournal:  jrnl_set_file (pargs.r.ret_str); break;
+        case oAllowUID: add_allowed_uid (pargs.r.ret_str, 0); break;
+        case oAllowGID: /*FIXME*/ break;
+        case oAdminUID: add_allowed_uid (pargs.r.ret_str, 1); break;
+        case oAdminGID: /*FIXME*/ break;
+        case oStripeKey: set_account_key (pargs.r.ret_str, 1); break;
+        case oPaypalKey: set_account_key (pargs.r.ret_str, 2); break;
+        case oLive: opt.livemode = 1; live_or_test = 1; break;
+        case oTest: opt.livemode = 0; live_or_test = 1; break;
+
+        case oConfig:
+          if (!configfp)
+            {
+              configname = pargs.r.ret_str;
+              goto next_pass;
+            }
+          /* Ignore this option in config files (no nesting).  */
+          break;
+        case oNoConfig: break; /* Already handled.  */
+
+        default:
+          pargs.err = configfp? ARGPARSE_PRINT_WARNING : ARGPARSE_PRINT_ERROR;
+          break;
+	}
+    }
+  if (configfp)
+    {
+      fclose (configfp);
+      configfp = NULL;
+      configname = NULL;
+      goto next_pass;
+    }
+
+  if (!live_or_test)
+    log_info ("implicitly using --test\n");
+}
+
+
 int
 main (int argc, char **argv)
 {
-  ARGPARSE_ARGS pargs;
-  const char *logfile = NULL;
-  int live_or_test = 0;
-
   /* Set program name etc.  */
   set_strusage (my_strusage);
   log_set_prefix ("payprocd", JNLIB_LOG_WITH_PREFIX);
@@ -322,35 +440,7 @@ main (int argc, char **argv)
   gpgme_set_locale (NULL, LC_MESSAGES, setlocale (LC_MESSAGES, NULL));
 #endif
 
-  /* Parse the command line. */
-  pargs.argc  = &argc;
-  pargs.argv  = &argv;
-  pargs.flags = ARGPARSE_FLAG_KEEP;
-  while (optfile_parse (NULL, NULL, NULL, &pargs, opts))
-    {
-      switch (pargs.r_opt)
-        {
-        case oVerbose:  opt.verbose++; break;
-        case oNoDetach: opt.nodetach = 1; break;
-        case oLogFile:  logfile = pargs.r.ret_str; break;
-        case oJournal:  jrnl_set_file (pargs.r.ret_str); break;
-        case oAllowUID: add_allowed_uid (pargs.r.ret_str, 0); break;
-        case oAllowGID: /*FIXME*/ break;
-        case oAdminUID: add_allowed_uid (pargs.r.ret_str, 1); break;
-        case oAdminGID: /*FIXME*/ break;
-        case oStripeKey: set_account_key (pargs.r.ret_str, 1); break;
-        case oPaypalKey: set_account_key (pargs.r.ret_str, 2); break;
-        case oLive: opt.livemode = 1; live_or_test = 1; break;
-        case oTest: opt.livemode = 0; live_or_test = 1; break;
-
-        default: pargs.err = ARGPARSE_PRINT_ERROR; break;
-	}
-    }
-
-  if (!live_or_test)
-    {
-      log_info ("implicitly using --test\n");
-    }
+  parse_options (argc, argv);
 
   if (opt.livemode && (!opt.stripe_secret_key
                        || strncmp (opt.stripe_secret_key, "sk_live_", 8)))
@@ -383,7 +473,7 @@ main (int argc, char **argv)
     }
 
   /* Start the server.  */
-  launch_server (logfile);
+  launch_server ();
 
   return 0;
 }
@@ -537,30 +627,34 @@ create_socket (const char *name)
 
 /* Fire up the server.  */
 static void
-launch_server (const char *logfile)
+launch_server (void)
 {
   int fd;
-  pid_t pid;
 
   fd = create_socket (server_socket_name ());
   fflush (NULL);
-  pid = fork ();
-  if (pid == (pid_t)-1)
+  if (!opt.nodetach)
     {
-      log_fatal ("fork failed: %s\n", strerror (errno) );
-      exit (1);
-    }
-  else if (pid)
-    { /* We are the parent */
+      pid_t pid;
 
-      remove_socket_flag = 0; /* Now owned by the child.  */
-      close (fd);
-      exit (0);
-    } /* End parent */
+      pid = fork ();
+      if (pid == (pid_t)-1)
+        {
+          log_fatal ("fork failed: %s\n", strerror (errno) );
+          exit (1);
+        }
+      else if (pid)
+        { /* We are the parent */
+
+          remove_socket_flag = 0; /* Now owned by the child.  */
+          close (fd);
+          exit (0);
+        } /* End parent */
+    }
 
   /*
-    This is the child
-  */
+   * This is the child (or the main process in case of --no-detach)
+   */
 
   remove_socket_flag = 1;
 
