@@ -44,6 +44,7 @@
 #include "journal.h"
 #include "session.h"
 #include "currency.h"
+#include "encrypt.h"
 #include "payprocd.h"
 
 
@@ -132,7 +133,6 @@ static ARGPARSE_OPTS opts[] = {
 
 /* Local prototypes.  */
 static void cleanup (void);
-static void check_openpgp_keys (void);
 static void launch_server (void);
 static void server_loop (int fd);
 static void handle_tick (void);
@@ -469,7 +469,7 @@ main (int argc, char **argv)
            && !strncmp (opt.stripe_secret_key, "sk_live_", 8))
     log_error ("test mode requested but live key given\n");
 
-  check_openpgp_keys ();
+  encrypt_setup_keys ();
 
   if (log_get_errorcount (0))
     exit (2);
@@ -478,10 +478,11 @@ main (int argc, char **argv)
     {
       int i, j, star;
 
-      log_info ("Mode: %s\n", opt.livemode? "live" : "test");
-      log_info ("Stripe key: %s\n", opt.stripe_secret_key? "yes":"no");
-      log_info ("Paypal key: %s\n", opt.paypal_secret_key? "yes":"no");
-      log_info ("Allowed users:");
+      log_info ("Mode .........: %s\n", opt.livemode? "live" : "test");
+      log_info ("Stripe key ...: %s\n", opt.stripe_secret_key? "yes":"no");
+      log_info ("Paypal key ...: %s\n", opt.paypal_secret_key? "yes":"no");
+      encrypt_show_keys ();
+      log_info ("Allowed users :");
       for (i=0; i < opt.n_allowed_uids; i++)
         {
           for (j=star=0; j < opt.n_allowed_admin_uids && !star; j++)
@@ -520,56 +521,7 @@ cleanup (void)
   p = opt.backoffice_key_fpr;
   opt.backoffice_key_fpr = NULL;
   xfree (p);
-}
-
-
-/* Check that the required OpenPGP keys are available.  */
-static void
-check_openpgp_keys (void)
-{
-  gpg_error_t err;
-  gpgme_ctx_t ctx = NULL;
-  gpgme_key_t key = NULL;
-
-  err = gpgme_new (&ctx);
-  if (err)
-    {
-      log_error ("error allocating a GPGME context: %s\n", gpg_strerror (err));
-      goto leave;
-    }
-
-  err = gpgme_set_protocol (ctx, GPGME_PROTOCOL_OPENPGP);
-  if (err)
-    {
-      log_error ("error requesting the OpenPGP protocol: %s\n",
-                 gpg_strerror (err));
-      goto leave;
-    }
-
-  /* Fixme: Replace gpgme_get_key by regualr key listing fucntions or
-   * better do a test encryption.  */
-  err = gpgme_get_key (ctx, opt.database_key_fpr, &key, 1);
-  if (err)
-    log_error ("error getting database key '%s': %s\n",
-               opt.database_key_fpr, gpg_strerror (err));
-  else if (!key || !key->can_encrypt || !key->secret)
-    log_error ("database key '%s' is not usable\n",
-               opt.database_key_fpr);
-
-  gpgme_key_unref (key);
-  key = NULL;
-  err = gpgme_get_key (ctx, opt.backoffice_key_fpr, &key, 0);
-  if (err)
-    log_error ("error getting backoffice key '%s': %s\n",
-               opt.backoffice_key_fpr, gpg_strerror (err));
-  else if (!key || !key->can_encrypt)
-    log_error ("backoffice key '%s' is not usable\n",
-               opt.backoffice_key_fpr);
-
-
- leave:
-  gpgme_key_unref (key);
-  gpgme_release (ctx);
+  encrypt_release_keys ();
 }
 
 

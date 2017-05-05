@@ -58,6 +58,7 @@ payprocd_SOURCES = \
 	cred.c cred.h \
 	journal.c journal.h \
 	preorder.c preorder.h \
+	encrypt.c encrypt.h \
 	session.c session.h \
 	$(common_headers) \
 	$(utility_sources)
