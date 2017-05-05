@@ -38,6 +38,37 @@ static gpgme_key_t backoffice_key;
 
 
 
+/* Create a new GPGME context for OpenPGP or print and return an
+ * error.  */
+static gpg_error_t
+create_context (gpgme_ctx_t *r_ctx)
+{
+  gpg_error_t err;
+
+  *r_ctx = NULL;
+
+  err = gpgme_new (r_ctx);
+  if (err)
+    {
+      log_error ("error allocating a GPGME context: %s\n", gpg_strerror (err));
+      return err;
+    }
+
+  err = gpgme_set_protocol (*r_ctx, GPGME_PROTOCOL_OPENPGP);
+  if (err)
+    {
+      log_error ("error requesting the OpenPGP protocol: %s\n",
+                 gpg_strerror (err));
+      gpgme_release (*r_ctx);
+      *r_ctx = NULL;
+      return err;
+    }
+
+  return 0;
+}
+
+
+
 /* Setup the required OpenPGP keys.  Returnc NULL on success and an
  * error code on failure.  Also uses log_error on error.  Can be used
  * at anytime because it is npth_safe. */
@@ -46,24 +77,13 @@ encrypt_setup_keys (void)
 {
   gpg_error_t err;
   gpg_error_t firsterr = 0;
-  gpgme_ctx_t ctx = NULL;
+  gpgme_ctx_t ctx;
   gpgme_key_t key = NULL;
   gpgme_key_t tmpkey;
 
-  err = gpgme_new (&ctx);
+  err = create_context (&ctx);
   if (err)
-    {
-      log_error ("error allocating a GPGME context: %s\n", gpg_strerror (err));
-      goto leave;
-    }
-
-  err = gpgme_set_protocol (ctx, GPGME_PROTOCOL_OPENPGP);
-  if (err)
-    {
-      log_error ("error requesting the OpenPGP protocol: %s\n",
-                 gpg_strerror (err));
-      goto leave;
-    }
+    goto leave;
 
   /* Fixme: Replace gpgme_get_key by regular key listing functions or
    * maybe even do a test encryption.  */
@@ -171,4 +191,118 @@ encrypt_show_keys (void)
     log_printf ("invalid\n");
   else
     log_printf ("none\n");
+}
+
+
+/* Encrypt STRING to the keys specified by the bitflags in ENCRYPT_TO
+ * and return an allocated, base64 encoded string at RESULT.  On error
+ * NULL is stored at RESULT and an error code returned.  */
+gpg_error_t
+encrypt_string (char **result, const char *string, int encrypt_to)
+{
+  gpg_error_t err;
+  gpgme_ctx_t ctx;
+  gpgme_data_t input = NULL;
+  gpgme_data_t output = NULL;
+  gpgme_key_t keys[2+1];
+  int keycount = 0;
+  gpgme_encrypt_result_t encres;
+  gpgme_invalid_key_t invkey;
+  int i;
+  char *outbuffer = NULL;
+  size_t outbuflen;
+
+  *result = NULL;
+
+  /* Check that a key is specified and allflags are known.  */
+  if (!encrypt_to
+      || (encrypt_to & ~(ENCRYPT_TO_DATABASE|ENCRYPT_TO_BACKOFFICE)))
+    return gpg_error (GPG_ERR_INV_FLAG);
+
+  /* No need to encrypt an empty string.  Use shortcut. */
+  if (!string || !*string)
+    {
+      *result = xtrystrdup ("");
+      return *result? 0 : gpg_error_from_syserror ();
+    }
+
+  /* No prepare the encryption.  */
+  err = create_context (&ctx);
+  if (err)
+    return err;
+
+  /* We never want to see a pinentry.  */
+  err = gpgme_set_pinentry_mode (ctx, GPGME_PINENTRY_MODE_LOOPBACK);
+  if (err)
+    goto leave;
+
+  /* Create data objects.  */
+  err = gpgme_data_new_from_mem (&input, string, strlen (string), 0);
+  if (err)
+    goto leave;
+
+  err = gpgme_data_new (&output);
+  if (err)
+    goto leave;
+
+  /* Encrypt.  */
+  if ((encrypt_to & ENCRYPT_TO_DATABASE))
+    {
+      gpgme_key_ref (database_key);
+      keys[keycount++] = database_key;
+    }
+  if ((encrypt_to & ENCRYPT_TO_BACKOFFICE))
+    {
+      gpgme_key_ref (backoffice_key);
+      keys[keycount++] = backoffice_key;
+    }
+  keys[keycount] = NULL;
+
+  /* NB. The data items are in general small and thus it does not make
+   * sense to use compression.  */
+  err = gpgme_op_encrypt (ctx, keys,
+                          (GPGME_ENCRYPT_ALWAYS_TRUST
+                           | GPGME_ENCRYPT_NO_ENCRYPT_TO
+                           | GPGME_ENCRYPT_NO_COMPRESS),
+                          input, output);
+  if (err)
+    goto leave;
+  encres = gpgme_op_encrypt_result (ctx);
+  if (encres)
+    {
+      for (invkey = encres->invalid_recipients; invkey; invkey = invkey->next)
+        {
+          log_error ("encryption key '%s' was not used: %s <%s>\n",
+                     invkey->fpr, gpg_strerror (invkey->reason),
+                     gpg_strsource (invkey->reason));
+          err = gpg_error (GPG_ERR_NO_PUBKEY);
+        }
+    }
+  if (err)
+    goto leave;
+
+  /* Convert to Base64.  */
+  outbuffer = gpgme_data_release_and_get_mem (output, &outbuflen);
+  output = NULL;
+  if (!outbuffer)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  *result = base64_encode (outbuffer, outbuflen);
+  if (!*result)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+
+
+ leave:
+  gpgme_free (outbuffer);
+  for (i=0; i < keycount; i++)
+    gpgme_key_unref (keys[i]);
+  gpgme_data_release (output);
+  gpgme_data_release (input);
+  gpgme_release (ctx);
+  return err;
 }

@@ -708,6 +708,104 @@ parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data)
 }
 
 
+
+/* Conversion table for base64_encode.  */
+static char const bintoasc[64] = {
+  'A','B','C','D','E','F','G','H','I','J','K','L','M',
+  'N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+  'a','b','c','d','e','f','g','h','i','j','k','l','m',
+  'n','o','p','q','r','s','t','u','v','w','x','y','z',
+  '0','1','2','3','4','5','6','7','8','9','+','/'
+};
+
+
+/* Encode (DATA,DATALEN) in Base64 format (w/o padding) and return a
+ * malloced string.  Returns NULL and sets ERRNO on error.  */
+char *
+base64_encode (const void *data, size_t datalen)
+{
+  char *buffer, *p;
+  const unsigned char *s = data;
+  size_t n = datalen;
+
+  buffer = p = xtrymalloc ((n+2)/3*4 + 1);
+  if (!buffer)
+    return NULL;
+
+  for (; n >= 3 ; n -= 3, s += 3)
+    {
+      *p++ = bintoasc[ ((s[0] >> 2)   & 077) ];
+      *p++ = bintoasc[ ((((s[0] << 4) & 060) | ((s[1] >> 4) & 017)) & 077) ];
+      *p++ = bintoasc[ ((((s[1] << 2) & 074) | ((s[2] >> 6) & 003)) & 077) ];
+      *p++ = bintoasc[ (s[2] & 077) ];
+    }
+  if (n == 2)
+    {
+      *p++ = bintoasc[ ((s[0]   >> 2) & 077) ];
+      *p++ = bintoasc[ ((((s[0] << 4) & 060) | ((s[1] >> 4) & 017)) & 077) ];
+      *p++ = bintoasc[ ((s[1]   << 2) & 074) ];
+    }
+  else if (n == 1)
+    {
+      *p++ = bintoasc[ ((s[0] >> 2) & 077) ];
+      *p++ = bintoasc[ ((s[0] << 4) & 060) ];
+    }
+  *p = 0;
+
+  return buffer;
+}
+
+
+/* Decode plain Base64 encoded data in STRING and return it in at as a
+ * malloced buffer at (DATA,DATALEN).  On error set them to (NULL,0)
+ * and return an error code.  An extra Nul is always added to a
+ * returned buffer. */
+gpg_error_t
+base64_decode (const char *string, void **r_data, size_t *r_datalen)
+{
+  gpg_error_t err;
+  gpgrt_b64state_t state;
+  char *buffer;
+  size_t len;
+
+  *r_data = NULL;
+  *r_datalen = 0;
+
+  buffer = xtrystrdup (string);
+  if (!buffer)
+    return gpg_error_from_syserror ();
+
+  state = gpgrt_b64dec_start (NULL);
+  if (!state)
+    {
+      err = gpg_error_from_syserror ();
+      xfree (buffer);
+      return err;
+    }
+
+  err = gpgrt_b64dec_proc (state, buffer, strlen (buffer), &len);
+  if (gpg_err_code (err) == GPG_ERR_EOF)
+    err = 0;
+  if (err)
+    {
+      gpgrt_b64dec_finish (state);
+      xfree (buffer);
+      return err;
+    }
+
+  err = gpgrt_b64dec_finish (state);
+  if (err)
+    {
+      xfree (buffer);
+      return err;
+    }
+  buffer[len] = 0; /* We know that there is enough space for this.  */
+
+  *r_data = buffer;
+  *r_datalen = len;
+  return 0;
+}
+
 
 
 /* Mapping table for zb32.  */

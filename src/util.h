@@ -157,6 +157,9 @@ unsigned int keyvalue_get_uint (keyvalue_t list, const char *key);
 
 gpg_error_t parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data);
 
+char *base64_encode (const void *data, size_t datalen);
+gpg_error_t base64_decode (const char *string, void **r_data,size_t *r_datalen);
+
 int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);
 

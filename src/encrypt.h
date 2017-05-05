@@ -20,9 +20,14 @@
 #ifndef ENCRYPT_H
 #define ENCRYPT_H
 
+/* Bit flags to specify which encrytpion key to use.  */
+#define ENCRYPT_TO_DATABASE    1 /* Encrypt to the database.  */
+#define ENCRYPT_TO_BACKOFFICE  2 /* Encrypt to the backoffice.  */
+
 gpg_error_t encrypt_setup_keys (void);
 void encrypt_release_keys (void);
 void encrypt_show_keys (void);
+gpg_error_t encrypt_string (char **result, const char *string, int encrypt_to);
 
 
 #endif /*ENCRYPT_H*/
