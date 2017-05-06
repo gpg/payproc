@@ -719,8 +719,8 @@ static char const bintoasc[64] = {
 };
 
 
-/* Encode (DATA,DATALEN) in Base64 format (w/o padding) and return a
- * malloced string.  Returns NULL and sets ERRNO on error.  */
+/* Encode (DATA,DATALEN) in Base64 format and return a malloced
+ * string.  Returns NULL and sets ERRNO on error.  */
 char *
 base64_encode (const void *data, size_t datalen)
 {
@@ -744,11 +744,14 @@ base64_encode (const void *data, size_t datalen)
       *p++ = bintoasc[ ((s[0]   >> 2) & 077) ];
       *p++ = bintoasc[ ((((s[0] << 4) & 060) | ((s[1] >> 4) & 017)) & 077) ];
       *p++ = bintoasc[ ((s[1]   << 2) & 074) ];
+      *p++ = '=';
     }
   else if (n == 1)
     {
       *p++ = bintoasc[ ((s[0] >> 2) & 077) ];
       *p++ = bintoasc[ ((s[0] << 4) & 060) ];
+      *p++ = '=';
+      *p++ = '=';
     }
   *p = 0;
 
@@ -784,8 +787,6 @@ base64_decode (const char *string, void **r_data, size_t *r_datalen)
     }
 
   err = gpgrt_b64dec_proc (state, buffer, strlen (buffer), &len);
-  if (gpg_err_code (err) == GPG_ERR_EOF)
-    err = 0;
   if (err)
     {
       gpgrt_b64dec_finish (state);

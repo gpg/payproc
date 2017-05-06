@@ -69,6 +69,30 @@ test_keyvalue_put_meta (void)
 
 
 static void
+do_test_base64_encoding (int idx, const char *plain, const char *encoded)
+{
+  gpg_error_t err;
+  void *buffer;
+  size_t buflen;
+
+  buffer = base64_encode (plain, strlen (plain));
+  if (!buffer)
+    fail (idx);
+  if (strcmp (buffer, encoded))
+    fail (idx);
+
+  err = base64_decode (encoded, &buffer, &buflen);
+  if (err)
+    fail (idx);
+  if (!buffer)
+    fail (idx);
+  if (buflen != strlen (plain) || memcmp (buffer, plain, buflen))
+    fail (idx);
+  xfree (buffer);
+}
+
+
+static void
 test_base64_encoding (void)
 {
   static const char *test_string = "libgpg-error is free software; "
@@ -84,42 +108,12 @@ test_base64_encoding (void)
     "247IGVpdGhlciB2ZXJzaW9uIDIuMSBvZiB0aGUgTGljZW5zZSwgb3IgKGF0IHlvdXI"
     "gb3B0aW9uKSBhbnkgbGF0ZXIgdmVyc2lvbi4=";
 
-  gpg_error_t err;
-  void *buffer;
-  size_t buflen;
-  char *nopad_string;
-
-  /* Our encoder does not add pad characters.  Thus we create a second
-   * test result with that stripped.  */
-  nopad_string = xstrdup (test_b64_string);
-  nopad_string[strlen (nopad_string)-1] = 0;
-
-  /* Test encoder.  */
-  buffer = base64_encode (test_string, strlen (test_string));
-  if (!buffer)
-    fail (1);
-  if (strcmp (buffer, nopad_string))
-    fail (2);
-
-  err = base64_decode (test_b64_string, &buffer, &buflen);
-  if (err)
-    fail (11);
-  if (!buffer)
-    fail (12);
-  if (buflen != strlen (test_string) || memcmp (buffer, test_string, buflen))
-    fail (13);
-  xfree (buffer);
-
-  err = base64_decode (nopad_string, &buffer, &buflen);
-  if (err)
-    fail (21);
-  if (!buffer)
-    fail (22);
-  if (buflen != strlen (test_string) || memcmp (buffer, test_string, buflen))
-    fail (23);
-  xfree (buffer);
-
-  xfree (nopad_string);
+  do_test_base64_encoding (1, test_string, test_b64_string);
+  do_test_base64_encoding (2, "",     "");
+  do_test_base64_encoding (3, "a",    "YQ==");
+  do_test_base64_encoding (4, "aa",   "YWE=");
+  do_test_base64_encoding (5, "aaa",  "YWFh");
+  do_test_base64_encoding (6, "aaaa", "YWFhYQ==");
 }
 
 
