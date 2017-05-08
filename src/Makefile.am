@@ -84,7 +84,7 @@ ppipnhd_SOURCES = ppipnhd.c
 ppipnhd_CFLAGS =
 ppipnhd_LDADD =
 
-module_tests = t-util t-commands t-preorder
+module_tests = t-util t-commands t-preorder t-encrypt
 
 AM_CFLAGS = $(GPG_ERROR_CFLAGS)
 LDADD  = -lm libcommon.a $(GPG_ERROR_LIBS)
@@ -113,3 +113,9 @@ t_commands_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS)
 t_preorder_SOURCES = t-preorder.c $(t_common_sources) journal.c currency.c
 t_preorder_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS)
 t_preorder_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS)
+
+t_encrypt_SOURCES = t-encrypt.c $(t_common_sources) journal.c currency.c
+t_encrypt_CFLAGS  = $(t_common_cflags) $(LIBGCRYPT_CFLAGS) $(SQLITE3_CFLAGS) \
+	            $(GPGME_CFLAGS)
+t_encrypt_LDADD   = $(t_common_ldadd) $(LIBGCRYPT_LIBS) $(SQLITE3_LIBS) \
+                    $(GPGME_LIBS)

@@ -41,7 +41,7 @@ static gpgme_key_t backoffice_key;
 /* Create a new GPGME context for OpenPGP or print and return an
  * error.  */
 static gpg_error_t
-create_context (gpgme_ctx_t *r_ctx)
+create_context (gpgme_ctx_t *r_ctx, gpgme_pinentry_mode_t pinmode)
 {
   gpg_error_t err;
 
@@ -64,6 +64,15 @@ create_context (gpgme_ctx_t *r_ctx)
       return err;
     }
 
+  err = gpgme_set_pinentry_mode (*r_ctx, pinmode);
+  if (err)
+    {
+      log_error ("error setting pinentry mode: %s\n", gpg_strerror (err));
+      gpgme_release (*r_ctx);
+      *r_ctx = NULL;
+      return err;
+    }
+
   return 0;
 }
 
@@ -81,7 +90,7 @@ encrypt_setup_keys (void)
   gpgme_key_t key = NULL;
   gpgme_key_t tmpkey;
 
-  err = create_context (&ctx);
+  err = create_context (&ctx, GPGME_PINENTRY_MODE_CANCEL);
   if (err)
     goto leave;
 
@@ -227,14 +236,9 @@ encrypt_string (char **result, const char *string, int encrypt_to)
     }
 
   /* No prepare the encryption.  */
-  err = create_context (&ctx);
+  err = create_context (&ctx, GPGME_PINENTRY_MODE_CANCEL);
   if (err)
     return err;
-
-  /* We never want to see a pinentry.  */
-  err = gpgme_set_pinentry_mode (ctx, GPGME_PINENTRY_MODE_LOOPBACK);
-  if (err)
-    goto leave;
 
   /* Create data objects.  */
   err = gpgme_data_new_from_mem (&input, string, strlen (string), 0);
@@ -246,12 +250,12 @@ encrypt_string (char **result, const char *string, int encrypt_to)
     goto leave;
 
   /* Encrypt.  */
-  if ((encrypt_to & ENCRYPT_TO_DATABASE))
+  if ((encrypt_to & ENCRYPT_TO_DATABASE) && database_key)
     {
       gpgme_key_ref (database_key);
       keys[keycount++] = database_key;
     }
-  if ((encrypt_to & ENCRYPT_TO_BACKOFFICE))
+  if ((encrypt_to & ENCRYPT_TO_BACKOFFICE) && backoffice_key)
     {
       gpgme_key_ref (backoffice_key);
       keys[keycount++] = backoffice_key;
@@ -301,6 +305,86 @@ encrypt_string (char **result, const char *string, int encrypt_to)
   gpgme_free (outbuffer);
   for (i=0; i < keycount; i++)
     gpgme_key_unref (keys[i]);
+  gpgme_data_release (output);
+  gpgme_data_release (input);
+  gpgme_release (ctx);
+  return err;
+}
+
+
+/* Decrypt an OpenPGP encrypted and Base64 encoded STRING and return
+ * the plaintext as an allocated string at RESULT.  If the reult
+ * contains embedded Nuls an error is returned.  On error NULL is
+ * stored at RESULT and an error code returned.  Note that RESULT is
+ * better freed using gpgme_free in case that on Windows the GPGME DLL
+ * uses a different runtime than than payprocd.  */
+gpg_error_t
+decrypt_string (char **result, const char *string)
+{
+  gpg_error_t err;
+  gpgme_ctx_t ctx;
+  gpgme_data_t input = NULL;
+  gpgme_data_t output = NULL;
+  char *outbuffer = NULL;
+  size_t outbuflen;
+
+  *result = NULL;
+
+  /* No need to decrypt an empty string.  Use shortcut. */
+  if (!string || !*string)
+    {
+      *result = xtrystrdup ("");
+      return *result? 0 : gpg_error_from_syserror ();
+    }
+
+  /* Put STRING into a GPGME data object.  */
+  {
+    void *tmpdata;
+    size_t tmpdatalen;
+
+    err = base64_decode (string, &tmpdata, &tmpdatalen);
+    if (err)
+      goto leave;
+    err = gpgme_data_new_from_mem (&input, tmpdata, tmpdatalen, 1);
+    xfree (tmpdata);
+    if (err)
+      goto leave;
+  }
+
+  /* Allocate a data object for the plaintext.  */
+  err = gpgme_data_new (&output);
+  if (err)
+    goto leave;
+
+  /* Prepare the decryption.  We expect that the secret key has no
+   * passpharse set and thus we do not expect a Pinentry.  */
+  err = create_context (&ctx, GPGME_PINENTRY_MODE_CANCEL);
+  if (err)
+    goto leave;
+
+  /* Decrypt.  */
+  err = gpgme_op_decrypt (ctx, input, output);
+  if (err)
+    goto leave;
+
+  /* Get data from the output object.  */
+  outbuffer = gpgme_data_release_and_get_mem (output, &outbuflen);
+  output = NULL;
+  if (!outbuffer)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  if (strlen (outbuffer) != outbuflen)
+    {
+      err = gpg_error (GPG_ERR_BOGUS_STRING);
+      goto leave;
+    }
+  *result = outbuffer;
+  outbuffer = NULL;
+
+ leave:
+  gpgme_free (outbuffer);
   gpgme_data_release (output);
   gpgme_data_release (input);
   gpgme_release (ctx);
