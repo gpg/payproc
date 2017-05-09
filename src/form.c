@@ -45,6 +45,8 @@ encode_formdata (keyvalue_t form, char **r_encoded)
     {
       if (kv != form)
         put_membuf_str (&mb, "&");
+      if (!kv->value)
+        continue;  /* Deleted item.  */
       escaped = http_escape_string (kv->name, NULL/*form-encoding*/);
       if (!escaped)
         {
