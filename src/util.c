@@ -164,6 +164,20 @@ ascii_strupr (char *s)
 }
 
 
+/* Lowercase all ASCII characters in S.  */
+char *
+ascii_strlwr (char *s)
+{
+  char *p = s;
+
+  for (p=s; *p; p++ )
+    if (isascii (*p) && *p >= 'A' && *p <= 'Z')
+      *p |= 0x20;
+
+  return s;
+}
+
+
 
 /*
  * Check whether STRING starts with KEYWORD.  The keyword is

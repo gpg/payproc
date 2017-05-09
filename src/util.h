@@ -118,6 +118,7 @@ char *xstrdup (const char *string);
 char *strconcat (const char *s1, ...) JNLIB_GCC_A_SENTINEL(0);
 
 char *ascii_strupr (char *s);
+char *ascii_strlwr (char *s);
 
 char *has_leading_keyword (const char *string, const char *keyword);
 const char *memstr (const void *buffer, size_t buflen, const char *sub);
