@@ -32,6 +32,7 @@ common_sources = \
 	membuf.c membuf.h \
 	strlist.c strlist.h \
 	percent.c \
+	mbox-util.c mbox-util.h \
 	argparse.c argparse.h \
 	protocol-io.c protocol-io.h
 
