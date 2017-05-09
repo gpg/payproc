@@ -111,6 +111,20 @@ amount converted to an Euro value.  This conversion is done using the
 reference data retrieved via cron job.  It may be different from the
 conversion done by the payment service provider.
 
+To check recurring donations two additional items are required in the
+request:
+
+#+begin_example
+Recur: 12
+Stmt-Desc: Foo
+#+end_example
+
+The valid values for "Recur" are 12 for per month, 4 for per quarter,
+and 1 for per year.  The "Stmt-Desc" is required and will be put on
+the credit card statement along with a "Monthly"/"Quarterly"/"Yearly"
+prefix.  The return value as the additional let "_plan-id".
+
+
 ** PPCHECKOUT
 
 PayPal Checkout.  See the source for details. FIXME.

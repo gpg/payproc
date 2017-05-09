@@ -1,5 +1,5 @@
 /* stripe.c - Access the stripe.com service
- * Copyright (C) 2014 g10 Code GmbH
+ * Copyright (C) 2014, 2017 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -464,6 +464,324 @@ stripe_charge_card (keyvalue_t *dict)
 
  leave:
   keyvalue_release (query);
+  cJSON_Delete (json);
+  return err;
+}
+
+
+
+/* Using the values from DICT a corresponding plan is retrieved or
+ * created.  The dictionary is then updated.  Required items:
+ *
+ *   _amount: The cent based amount.
+ *  Currency: A 3 letter currency code.
+ *     Recur: The recurrence interval:
+ *            1 = yearly, 4 = quarterly, 12 = monthly.
+ * Stmt-Desc: String to be displayed on the credit card statement.
+ *            Will be truncated at about 22 characters.  A suffix
+ *            with the donation interval is appended.
+ *
+ * On success the following items are inserted/updated:
+ *
+ *  _plan-id: The Stripe plan id.  This is computed from the other
+ *            information given
+ */
+gpg_error_t
+stripe_find_create_plan (keyvalue_t *dict)
+{
+  gpg_error_t err;
+  int status;
+  keyvalue_t request = NULL;
+  cjson_t json = NULL;
+  const char *s;
+  cjson_t j_obj;
+  int recur;
+  char *plan_id = NULL;
+  char *stmt_desc = NULL;
+
+  s = keyvalue_get_string (*dict, "Currency");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&request, "currency", s);
+  if (err)
+    goto leave;
+
+  recur = keyvalue_get_int (*dict, "Recur");
+  if (recur != 1 && recur != 4 && recur != 12)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+
+  /* _amount is the amount in the smallest unit of the currency.  */
+  s = keyvalue_get_string (*dict, "_amount");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&request, "amount", s);
+  if (err)
+    goto leave;
+
+  /* Build the id.  */
+  plan_id = es_bsprintf ("gnupg-%d-%s-%s", recur, s,
+                         keyvalue_get_string (request, "currency"));
+  if (!plan_id)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  ascii_strlwr (plan_id); /* This is for the currency part.  */
+
+
+  err = call_stripe (opt.stripe_secret_key,
+                     "plans", plan_id, NULL, &status, &json);
+  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
+  if (err)
+    goto leave;
+  if (status == 200)
+    {
+      /* This plan already exists.  */
+      goto plan_found;
+    }
+  else if (status != 404)
+    {
+      log_error ("rerteive_plan: error: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+  /* This is a 404 - We assume that the plan was not found.  */
+
+  err = keyvalue_put (&request, "id", plan_id);
+  if (err)
+    goto leave;
+
+  if (recur == 12)
+    {
+      err = keyvalue_put (&request, "interval", "month");
+      if (!err)
+        err = keyvalue_put (&request, "interval_count", "1");
+    }
+  else if (recur == 4)
+    {
+      err = keyvalue_put (&request, "interval", "month");
+      if (!err)
+        err = keyvalue_put (&request, "interval_count", "3");
+    }
+  else
+    {
+      err = keyvalue_put (&request, "interval", "year");
+      if (!err)
+        err = keyvalue_put (&request, "interval_count", "1");
+    }
+
+  if (err)
+    goto leave;
+
+
+  s = keyvalue_get_string (*dict, "Stmt-Desc");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  stmt_desc = es_bsprintf ("%s%s",
+                          recur == 1  ? "Yearly " :
+                          recur == 4  ? "Quarterly " :
+                          recur == 12 ? "Monthly " : "",
+                          s);
+  if (!stmt_desc)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  err = keyvalue_put (&request, "statement_descriptor", stmt_desc);
+  if (err)
+    goto leave;
+  err = keyvalue_put (&request, "name", stmt_desc);
+  if (err)
+    goto leave;
+
+  err = call_stripe (opt.stripe_secret_key,
+                     "plans", NULL, request, &status, &json);
+  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
+  if (err)
+    goto leave;
+  if (status != 200)
+    {
+      log_error ("create_plan: error: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+ plan_found:
+  j_obj = cJSON_GetObjectItem (json, "id");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      log_error ("charge_card: bad or missing 'id'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_put (dict, "_plan-id", j_obj->valuestring);
+  if (err)
+    goto leave;
+
+
+ leave:
+  es_free (stmt_desc);
+  es_free (plan_id);
+  keyvalue_release (request);
+  cJSON_Delete (json);
+  return err;
+}
+
+
+
+/* Using the values from DICT find or create a new customer and
+ * subscribe it to a provided plan.  Required items:
+ *
+ *   _plan_id: The plan to subscribe the customer to.
+ * Card-Token: The token returned by the CARDTOKEN command.
+ *
+ * On success the following items are inserted/updated:
+ *
+ *  xxxx:
+ */
+gpg_error_t
+stripe_create_subscription (keyvalue_t *dict)
+{
+  gpg_error_t err;
+  int status;
+  keyvalue_t request = NULL;
+  cjson_t json = NULL;
+  const char *s;
+  cjson_t j_obj;
+  int recur;
+  char *plan_id = NULL;
+  char *customer_id = NULL;
+
+  /* First check that we have all required data. */
+  s = keyvalue_get_string (*dict, "_plan-id");
+  if (!*s)
+    {
+      log_error ("%s: missing '_plan-id'\n", __func__);
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  s = keyvalue_get_string (*dict, "Card-Token");
+  if (!*s)
+    {
+      log_error ("%s: missing 'Card-Token'\n", __func__);
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  s = keyvalue_get_string (*dict, "Email");
+  if (!*s)
+    {
+      log_error ("%s: missing 'Email'\n", __func__);
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&request, "email", s);
+  if (err)
+    goto leave;
+
+  /* FIXME: Figure out whether we already have a customer with the a
+   * verified mail address and print a warning that a subscription
+   * already exists and can be chnaged using the account manager.  */
+
+  /* Create a customer.  */
+  err = call_stripe (opt.stripe_secret_key,
+                     "customers", NULL, request, &status, &json);
+  log_debug ("call_stripe/create_customer => %s status=%d\n",
+             gpg_strerror (err), status);
+  log_debug ("Result:\n%s\n", cJSON_Print(json));
+  if (err)
+    goto leave;
+  if (status != 200)
+    {
+      log_error ("create_customer: error: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+  /* Create a scubscription.  */
+
+  /* Get the customer ID and put it into the request.  */
+  j_obj = cJSON_GetObjectItem (json, "id");
+  if (!j_obj || !cjson_is_string (j_obj))
+    {
+      log_error ("create_customer: bad or missing 'id'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_put (&request, "customer", j_obj->valuestring);
+  if (err)
+    goto leave;
+  /* We don't need the result anymore.  */
+  cJSON_Delete (json);
+  json = NULL;
+
+  /* Remove the email from the request.  */
+  keyvalue_del (request, "email");
+
+  /* Add the token to the request and then delete it from the
+   * dictionary.  It is supposed to be one-time and we do not want to
+   * accidently use it again.  */
+  s = keyvalue_get_string (*dict, "Card-Token");
+  if (!*s)
+    {
+      log_error ("%s: missing 'Card-Token'\n", __func__);
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&request, "source", s);
+  if (err)
+    goto leave;
+  keyvalue_del (*dict, "Card-Token");
+
+  /* Add the plan to the request.  */
+  s = keyvalue_get_string (*dict, "_plan-id");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = keyvalue_put (&request, "plan", s);
+  if (err)
+    goto leave;
+
+  err = call_stripe (opt.stripe_secret_key,
+                     "subscriptions", NULL, request, &status, &json);
+  log_debug ("call_stripe/create_subscriptions => %s status=%d\n",
+             gpg_strerror (err), status);
+  log_debug ("Result:\n%s\n", cJSON_Print(json));
+  if (err)
+    goto leave;
+  if (status != 200)
+    {
+      log_error ("create_subscriptions: error: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+
+ leave:
+  xfree (customer_id);
+  keyvalue_release (request);
   cJSON_Delete (json);
   return err;
 }

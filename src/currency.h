@@ -27,5 +27,7 @@ const char *get_currency_info (int seq, char const **r_desc, double *r_rate);
 char *convert_currency (char *buffer, size_t bufsize,
                         const char *currency, const char *amount);
 
+int valid_recur_p (const char *string, int *r_recur);
+
 
 #endif /*CURRENCY_H*/

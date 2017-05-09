@@ -1,5 +1,5 @@
 /* commands.c - Handle a client request.
- * Copyright (C) 2014, 2015 g10 Code GmbH
+ * Copyright (C) 2014, 2015, 2017 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -34,6 +34,7 @@
 #include "currency.h"
 #include "preorder.h"
 #include "protocol-io.h"
+#include "mbox-util.h"
 #include "commands.h"
 
 /* Helper macro for the cmd_ handlers.  */
@@ -414,30 +415,35 @@ cmd_cardtoken (conn_t conn, char *args)
 
 
 /* The CHARGECARD command charges the given amount to a card.  The
-   following values are expected in the dataitems:
-
-   Amount:     The amount to charge with optional decimal fraction.
-   Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
-   Card-Token: The token returned by the CARDTOKEN command.
-   Capture:    Optional; defaults to true.  If set to false
-               this command creates only an authorization.
-               The command CAPTURECHARGE must then be used
-               to actually charge the card. [currently ignored]
-   Desc:       Optional description of the charge.
-   Stmt-Desc:  Optional string to be displayed on the credit
-               card statement.  Will be truncated at about 15 characters.
-   Email:      Optional contact mail address of the customer
-   Meta[NAME]: Meta data further described by NAME.  This is used to convey
-               application specific data to the log file.
-
-   On success these items are returned:
-
-   Charge-Id:  The ID describing this charge
-   Live:       Set to 'f' in test mode or 't' in live mode.
-   Currency:   The currency of the charge.
-   Amount:     The charged amount with optional decimal fraction.
-   _timestamp: The timestamp as written to the journal
-
+ * following values are expected in the dataitems:
+ *
+ * Amount:     The amount to charge with optional decimal fraction.
+ * Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+ * Recur:      An optional recurrence interval: 0 = not recurring,
+ *             1 = yearly, 4 = quarterly, 12 = monthly.
+ * Card-Token: The token returned by the CARDTOKEN command.
+ * Capture:    Optional; defaults to true.  If set to false
+ *             this command creates only an authorization.
+ *             The command CAPTURECHARGE must then be used
+ *             to actually charge the card. [currently ignored]
+ * Desc:       Optional description of the charge.
+ * Stmt-Desc:  Optional string to be displayed on the credit
+ *             card statement.  Will be truncated at about 15 characters.
+ * Email:      Optional contact mail address of the customer.
+ *             For recurring donations this is required.
+ * Meta[NAME]: Meta data further described by NAME.  This is used to convey
+ *             application specific data to the log file.
+ *
+ * On success these items are returned:
+ *
+ * Charge-Id:  The ID describing this charge
+ * Live:       Set to 'f' in test mode or 't' in live mode.
+ * Currency:   The currency of the charge.
+ * Amount:     The charged amount with optional decimal fraction.
+ * Recur:      0 or the Recur value.  To cope with too small amounts,
+ *             this and then also Amount may be changed from the request.
+ * _timestamp: The timestamp as written to the journal
+ *
  */
 static gpg_error_t
 cmd_chargecard (conn_t conn, char *args)
@@ -449,8 +455,21 @@ cmd_chargecard (conn_t conn, char *args)
   unsigned int cents;
   int decdigs;
   char *buf = NULL;
+  int recur;
 
   (void)args;
+
+  /* Get Recurrence value or replace by default.  */
+  s = keyvalue_get_string (dict, "Recur");
+  if (!valid_recur_p (s, &recur))
+    {
+      set_error (MISSING_VALUE, "Invalid value for 'Recur'");
+      goto leave;
+    }
+  err = keyvalue_putf (&conn->dataitems, "Recur", "%d", recur);
+  dict = conn->dataitems;
+  if (err)
+    goto leave;
 
   /* Get currency and amount.  */
   s = keyvalue_get_string (dict, "Currency");
@@ -472,7 +491,7 @@ cmd_chargecard (conn_t conn, char *args)
     goto leave;
 
   /* We only support the use of a card token and no direct supply of
-     card details.  This makes it easies to protect or audit the
+     card details.  This makes it easier to protect or audit the
      actual credit card data.  The token may only be used once.  */
   s = keyvalue_get_string (dict, "Card-Token");
   if (!*s)
@@ -481,10 +500,43 @@ cmd_chargecard (conn_t conn, char *args)
       goto leave;
     }
 
-  /* Let's ask Stripe to process it.  */
-  err = stripe_charge_card (&conn->dataitems);
-  if (err)
-    goto leave;
+  if (recur)
+    {
+      /* Let's ask Stripe to create a subscription.  */
+      s = keyvalue_get_string (dict, "Email");
+      if (!is_valid_mailbox (s))
+        {
+          set_error (MISSING_VALUE,
+                     "Recurring payment but no valid 'Email' given");
+          goto leave;
+        }
+
+      /* Find or create a plan.  */
+      err = stripe_find_create_plan (&conn->dataitems);
+      dict = conn->dataitems;
+      if (err)
+        {
+          conn->errdesc = "error creating a Plan";
+          goto leave;
+        }
+
+      /* Create a Subscription using the just plan from above and the
+       * Card-Token supplied to this command.  */
+      err = stripe_create_subscription (&conn->dataitems);
+      dict = conn->dataitems;
+      if (err)
+        {
+          conn->errdesc = "error creating a Subscription";
+          goto leave;
+        }
+    }
+  else
+    {
+      /* Let's ask Stripe to process it.  */
+      err = stripe_charge_card (&conn->dataitems);
+      if (err)
+        goto leave;
+    }
 
   buf = reconvert_amount (keyvalue_get_int (conn->dataitems, "_amount"),
                           decdigs);
@@ -497,7 +549,11 @@ cmd_chargecard (conn_t conn, char *args)
   err = keyvalue_put (&conn->dataitems, "Amount", buf);
   if (err)
     goto leave;
-  jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_STRIPE);
+
+  if (recur)
+    ;
+  else
+    jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_STRIPE);
 
  leave:
   if (err)
@@ -967,20 +1023,23 @@ cmd_listpreorder (conn_t conn, char *args)
 
 
 /* The CHECKAMOUNT command checks whether a given amount is within the
-   configured limits for payment.  It may eventually provide
-   additional options.  The following values are expected in the
-   dataitems:
-
-   Amount:     The amount to check with optional decimal fraction.
-   Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
-
-   On success these items are returned:
-
-   _amount:    The amount converted to an integer (i.e. 10.42 EUR -> 1042)
-   Amount:     The amount as above.
-   Limit:      If given, the maximum amount acceptable
-   Euro:       If returned, Amount converted to Euro.
-
+ * configured limits for payment.  It may eventually provide
+ * additional options.  The following values are expected in the
+ * dataitems:
+ *
+ * Amount:     The amount to check with optional decimal fraction.
+ * Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+ * Recur:      Optional: A recurrence interval: 0 = not recurring,
+ *             1 = yearly, 4 = quarterly, 12 = monthly.
+ *
+ * On success these items are returned:
+ *
+ * _amount:    The amount converted to an integer (i.e. 10.42 EUR -> 1042)
+ * Amount:     The amount as above; but see also Recur.
+ * Recur:      0 or the Recur value.  To cope with too small amounts,
+ *             this and then also Amount may be changed from the request.
+ * Limit:      If given, the maximum amount acceptable
+ * Euro:       If returned, Amount converted to Euro.
  */
 static gpg_error_t
 cmd_checkamount (conn_t conn, char *args)
@@ -993,11 +1052,24 @@ cmd_checkamount (conn_t conn, char *args)
   unsigned int cents;
   int decdigs;
   char amountbuf[AMOUNTBUF_SIZE];
+  int recur;
 
   (void)args;
 
   /* Delete items, we want to set.  */
   keyvalue_del (conn->dataitems, "Limit");
+
+  /* Get Recurrence value or replace by default.  */
+  s = keyvalue_get_string (dict, "Recur");
+  if (!valid_recur_p (s, &recur))
+    {
+      set_error (MISSING_VALUE, "Invalid value for 'Recur'");
+      goto leave;
+    }
+  err = keyvalue_putf (&conn->dataitems, "Recur", "%d", recur);
+  dict = conn->dataitems;
+  if (err)
+    goto leave;
 
   /* Get currency and amount.  */
   curr = keyvalue_get_string (dict, "Currency");
@@ -1018,11 +1090,24 @@ cmd_checkamount (conn_t conn, char *args)
     err = keyvalue_put (&conn->dataitems, "Euro", amountbuf);
   else
     err = 0;
+  if (err)
+    goto leave;
 
   err = keyvalue_putf (&conn->dataitems, "_amount", "%u", cents);
   dict = conn->dataitems;
   if (err)
     goto leave;
+
+  /* Make sure a plan exists.  Not really necessary, but it provides a
+   * nice interface to create plans for testing.  */
+  if (recur)
+    {
+      err = stripe_find_create_plan (&conn->dataitems);
+      dict = conn->dataitems;
+      if (err)
+        goto leave;
+    }
+
 
  leave:
   if (err)
@@ -1034,6 +1119,8 @@ cmd_checkamount (conn_t conn, char *args)
     {
       es_fprintf (conn->stream, "OK\n");
       write_data_line (keyvalue_find (conn->dataitems, "_amount"),
+                       conn->stream);
+      write_data_line (keyvalue_find (conn->dataitems, "_plan-id"),
                        conn->stream);
     }
   for (kv = conn->dataitems; kv; kv = kv->next)

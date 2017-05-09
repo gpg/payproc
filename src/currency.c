@@ -254,3 +254,27 @@ convert_currency (char *buffer, size_t bufsize,
 
   return buffer;
 }
+
+
+/* Check that the recurrence value in STRING is valid.  Returns true if
+ * so.  If R_RECUR is not NULL the recur value is stored as an int at
+ * that value; 0 is stored for an invalid value.  */
+int
+valid_recur_p (const char *string, int *r_recur)
+{
+  int recur;
+
+  recur = *string? atoi (string) : 0;
+  if (!recur || recur == 1 || recur == 4 || recur == 12)
+    ;
+  else
+    {
+      if (r_recur)
+        *r_recur = 0;
+      return 0;  /* Bad value.  */
+    }
+
+  if (r_recur)
+    *r_recur = recur;
+  return 1;
+}

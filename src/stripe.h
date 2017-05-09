@@ -22,6 +22,8 @@
 
 gpg_error_t stripe_create_card_token (keyvalue_t *dict);
 gpg_error_t stripe_charge_card (keyvalue_t *dict);
+gpg_error_t stripe_find_create_plan (keyvalue_t *dict);
+gpg_error_t stripe_create_subscription (keyvalue_t *dict);
 
 
 #endif /*STRIPE_H*/
