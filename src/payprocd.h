@@ -28,6 +28,7 @@ struct
 {
   int verbose;   /* Verbose logging.  */
   int nodetach;  /* Do not detach from the console.  */
+  int debug_stripe;  /* Debug Stripe REST interaction.  */
 
   int livemode;  /* Expect to be in live mode.  Default is test mode.  */
   char *stripe_secret_key;  /* The secret key for stripe.com */

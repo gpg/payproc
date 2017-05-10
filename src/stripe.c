@@ -66,6 +66,8 @@ call_stripe (const char *keystring, const char *method, const char *data,
   if (err)
     goto leave;
 
+  if (opt.debug_stripe)
+    log_debug ("stripe-req: %s %s\n", formdata? "POST" : "GET", url);
 
   err = http_open (&http,
                    formdata? HTTP_REQ_POST : HTTP_REQ_GET,
@@ -135,6 +137,19 @@ call_stripe (const char *keystring, const char *method, const char *data,
     }
   else
     err = gpg_error (GPG_ERR_NOT_FOUND);
+
+  if (opt.debug_stripe)
+    {
+      char *tmp;
+
+      log_debug ("stripe-rsp: %3d (%s)", status, gpg_strerror (err));
+      tmp = cJSON_Print (*r_json);
+      if (tmp)
+        log_printf ("\n%s\n", tmp);
+      log_flush ();
+      xfree (tmp);
+    }
+
 
  leave:
   http_close (http, 0);
@@ -282,7 +297,6 @@ stripe_create_card_token (keyvalue_t *dict)
 
   err = call_stripe (opt.stripe_secret_key,
                      "tokens", NULL, query, &status, &json);
-  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
   if (status != 200)
@@ -391,10 +405,8 @@ stripe_charge_card (keyvalue_t *dict)
 
   err = call_stripe (opt.stripe_secret_key,
                      "charges", NULL, query, &status, &json);
-  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
-  /* log_debug ("Result:\n%s\n", cJSON_Print(json)); */
   if (status != 200)
     {
       log_error ("charge_card: error: status=%u\n", status);
@@ -541,7 +553,6 @@ stripe_find_create_plan (keyvalue_t *dict)
 
   err = call_stripe (opt.stripe_secret_key,
                      "plans", plan_id, NULL, &status, &json);
-  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
   if (status == 200)
@@ -603,16 +614,19 @@ stripe_find_create_plan (keyvalue_t *dict)
       err = gpg_error_from_syserror ();
       goto leave;
     }
-  err = keyvalue_put (&request, "statement_descriptor", stmt_desc);
+
+  err = keyvalue_put (&request, "name", stmt_desc);
   if (err)
     goto leave;
-  err = keyvalue_put (&request, "name", stmt_desc);
+
+  if (strlen (stmt_desc) > 22)
+    stmt_desc[22] = 0;
+  err = keyvalue_put (&request, "statement_descriptor", stmt_desc);
   if (err)
     goto leave;
 
   err = call_stripe (opt.stripe_secret_key,
                      "plans", NULL, request, &status, &json);
-  log_debug ("call_stripe => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
   if (status != 200)
@@ -703,9 +717,6 @@ stripe_create_subscription (keyvalue_t *dict)
   /* Create a customer.  */
   err = call_stripe (opt.stripe_secret_key,
                      "customers", NULL, request, &status, &json);
-  log_debug ("call_stripe/create_customer => %s status=%d\n",
-             gpg_strerror (err), status);
-  log_debug ("Result:\n%s\n", cJSON_Print(json));
   if (err)
     goto leave;
   if (status != 200)
@@ -779,9 +790,6 @@ stripe_create_subscription (keyvalue_t *dict)
 
   err = call_stripe (opt.stripe_secret_key,
                      "subscriptions", NULL, request, &status, &json);
-  log_debug ("call_stripe/create_subscriptions => %s status=%d\n",
-             gpg_strerror (err), status);
-  log_debug ("Result:\n%s\n", cJSON_Print(json));
   if (err)
     goto leave;
   if (status != 200)
