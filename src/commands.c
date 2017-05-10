@@ -154,6 +154,7 @@ write_data_value (const char *value, estream_t fp)
   es_putc ('\n', fp);
 }
 
+
 static void
 write_data_line (keyvalue_t kv, estream_t fp)
 {
@@ -161,12 +162,92 @@ write_data_line (keyvalue_t kv, estream_t fp)
 
   if (!kv)
     return;
+
   value = kv->value;
   if (!value)
     return;
   es_fputs (kv->name, fp);
   es_fputs (": ", fp);
   write_data_value (value, fp);
+
+  if (opt.debug_client)
+    log_debug ("client-rsp: %s: %s\n", kv->name, kv->value? kv->value:"");
+}
+
+
+static void
+write_data_line_direct (const char *name, const char *value, estream_t fp)
+{
+  if (!value)
+    return;
+  es_fputs (name, fp);
+  es_fputs (": ", fp);
+  write_data_value (value, fp);
+
+  if (opt.debug_client)
+    log_debug ("client-rsp: %s: %s\n", name, value);
+}
+
+
+static void
+write_ok_line (estream_t fp)
+{
+  es_fputs ("OK\n", fp);
+  if (opt.debug_client)
+    log_debug ("client-rsp: OK\n");
+}
+
+
+static void
+write_ok_linef (estream_t fp, const char *format, ...)
+{
+  va_list arg_ptr;
+  char *buffer;
+
+  va_start (arg_ptr, format);
+  buffer = gpgrt_vbsprintf (format, arg_ptr);
+  va_end (arg_ptr);
+
+  es_fprintf (fp, "OK %s\n", buffer? buffer : "[out of core]");
+  if (opt.debug_client)
+    log_debug ("client-rsp: OK %s\n", buffer? buffer : "[out of core]");
+  es_free (buffer);
+}
+
+
+static void
+write_err_line (gpg_error_t err, const char *desc, estream_t fp)
+{
+  es_fprintf (fp, "ERR %d (%s)\n",
+              err, desc? desc : gpg_strerror (err));
+  if (opt.debug_client)
+    log_debug ("client-rsp: ERR %d (%s)\n",
+               err, desc? desc : gpg_strerror (err));
+}
+
+
+static void
+write_rem_line (const char *comment, estream_t fp)
+{
+  es_fprintf (fp, "# %s\n", comment);
+  if (opt.debug_client)
+    log_debug ("client-rsp: # %s\n", comment);
+}
+
+
+static void
+write_rem_linef (estream_t fp, const char *format, ...)
+{
+  va_list arg_ptr;
+  char *buffer;
+
+  va_start (arg_ptr, format);
+  buffer = gpgrt_vbsprintf (format, arg_ptr);
+  va_end (arg_ptr);
+
+  es_fprintf (fp, "# %s\n", buffer? buffer : "[out of core]");
+  if (opt.debug_client)
+    log_debug ("client-rsp: # %s\n", buffer? buffer : "[out of core]");
 }
 
 
@@ -289,16 +370,15 @@ cmd_session (conn_t conn, char *args)
     }
   else
     {
-      es_fputs ("ERR 1 (Unknown sub-command)\n"
-                "# Supported sub-commands are:\n"
-                "#   create [TTL]\n"
-                "#   get SESSID\n"
-                "#   put SESSID\n"
-                "#   destroy SESSID\n"
-                "#   alias SESSID\n"
-                "#   dealias ALIASID\n"
-                "#   sessid ALIASID\n"
-                , conn->stream);
+      write_err_line (1, "Unknown sub-command", conn->stream);
+      write_rem_line ("Supported sub-commands are:", conn->stream);
+      write_rem_line ("  create [TTL]",    conn->stream);
+      write_rem_line ("  get SESSID",      conn->stream);
+      write_rem_line ("  put SESSID",      conn->stream);
+      write_rem_line ("  destroy SESSID",  conn->stream);
+      write_rem_line ("  alias SESSID",    conn->stream);
+      write_rem_line ("  dealias ALIASID", conn->stream);
+      write_rem_line ("  sessid ALIASID",  conn->stream);
       return 0;
     }
 
@@ -317,15 +397,12 @@ cmd_session (conn_t conn, char *args)
     }
 
   if (err)
-    es_fprintf (conn->stream, "ERR %d (%s)\n",
-                err, errdesc? errdesc : gpg_strerror (err));
+    write_err_line (err, errdesc, conn->stream);
   else
     {
-      es_fprintf (conn->stream, "OK\n");
-      if (sessid)
-        es_fprintf (conn->stream, "_SESSID: %s\n", sessid);
-      if (aliasid)
-        es_fprintf (conn->stream, "_ALIASID: %s\n", aliasid);
+      write_ok_line (conn->stream);
+      write_data_line_direct ("_SESSID", sessid, conn->stream);
+      write_data_line_direct ("_ALIASID", aliasid, conn->stream);
       for (kv = conn->dataitems; kv; kv = kv->next)
         if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
           write_data_line (kv, conn->stream);
@@ -396,15 +473,14 @@ cmd_cardtoken (conn_t conn, char *args)
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
                        conn->stream);
     }
   else
-    es_fprintf (conn->stream, "OK\n");
+    write_ok_line (conn->stream);
   for (kv = conn->dataitems; kv; kv = kv->next)
     if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
       write_data_line (kv, conn->stream);
@@ -558,15 +634,14 @@ cmd_chargecard (conn_t conn, char *args)
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
                        conn->stream);
     }
   else
-    es_fprintf (conn->stream, "OK\n");
+    write_ok_line (conn->stream);
   for (kv = conn->dataitems; kv; kv = kv->next)
     if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
       write_data_line (kv, conn->stream);
@@ -690,19 +765,17 @@ cmd_ppcheckout (conn_t conn, char *args)
     }
   else
     {
-      es_fputs ("ERR 1 (Unknown sub-command)\n"
-                "# Supported sub-commands are:\n"
-                "#   prepare\n"
-                "#   execute\n"
-                , conn->stream);
+      write_err_line (1, "Unknown sub-command", conn->stream);
+      write_rem_line ("Supported sub-commands are:", conn->stream);
+      write_rem_line ("  prepare", conn->stream);
+      write_rem_line ("  execute", conn->stream);
       return 0;
     }
 
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
@@ -710,7 +783,7 @@ cmd_ppcheckout (conn_t conn, char *args)
     }
   else
     {
-      es_fprintf (conn->stream, "OK\n");
+      write_ok_line (conn->stream);
     }
 
   for (kv = conn->dataitems; kv; kv = kv->next)
@@ -724,8 +797,7 @@ cmd_ppcheckout (conn_t conn, char *args)
 
   if (!err)
     {
-      if (newsessid)
-        es_fprintf (conn->stream, "_SESSID: %s\n", newsessid);
+      write_data_line_direct ("_SESSID", newsessid, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "_timestamp"),
                        conn->stream);
     }
@@ -809,15 +881,14 @@ cmd_sepapreorder (conn_t conn, char *args)
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
                        conn->stream);
     }
   else
-    es_fprintf (conn->stream, "OK\n");
+    write_ok_line (conn->stream);
   for (kv = conn->dataitems; kv; kv = kv->next)
     if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
       write_data_line (kv, conn->stream);
@@ -899,8 +970,7 @@ cmd_commitpreorder (conn_t conn, char *args)
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
@@ -908,7 +978,7 @@ cmd_commitpreorder (conn_t conn, char *args)
     }
   else
     {
-      es_fprintf (conn->stream, "OK\n");
+      write_ok_line (conn->stream);
       for (kv = conn->dataitems; kv; kv = kv->next)
         if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
           write_data_line (kv, conn->stream);
@@ -952,8 +1022,7 @@ cmd_getpreorder (conn_t conn, char *args)
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
@@ -961,7 +1030,7 @@ cmd_getpreorder (conn_t conn, char *args)
     }
   else
     {
-      es_fprintf (conn->stream, "OK\n");
+      write_ok_line (conn->stream);
       for (kv = conn->dataitems; kv; kv = kv->next)
         if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
           write_data_line (kv, conn->stream);
@@ -997,8 +1066,7 @@ cmd_listpreorder (conn_t conn, char *args)
 
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "failure-mesg"),
@@ -1006,13 +1074,15 @@ cmd_listpreorder (conn_t conn, char *args)
     }
   else
     {
-      es_fprintf (conn->stream, "OK\nCount: %u\n", count);
+      write_ok_line (conn->stream);
+      snprintf (key, sizeof key, "%u", count);
+      write_data_line_direct ("Count", key, conn->stream);
       for (n=0; n < count; n++)
         {
           snprintf (key, sizeof key, "D[%u]", n);
-          es_fprintf (conn->stream, "%s: ", key);
-          write_data_value (keyvalue_get_string (conn->dataitems, key),
-                            conn->stream);
+          write_data_line_direct (key,
+                                  keyvalue_get_string (conn->dataitems, key),
+                                  conn->stream);
         }
     }
 
@@ -1112,12 +1182,11 @@ cmd_checkamount (conn_t conn, char *args)
  leave:
   if (err)
     {
-      es_fprintf (conn->stream, "ERR %d (%s)\n", err,
-                  conn->errdesc? conn->errdesc : gpg_strerror (err));
+      write_err_line (err, conn->errdesc, conn->stream);
     }
   else
     {
-      es_fprintf (conn->stream, "OK\n");
+      write_ok_line (conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "_amount"),
                        conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "_plan-id"),
@@ -1162,35 +1231,38 @@ cmd_getinfo (conn_t conn, char *args)
       const char *name, *desc;
       double rate;
 
-      es_fputs ("OK\n", conn->stream);
+      write_ok_line (conn->stream);
       for (i=0; (name = get_currency_info (i, &desc, &rate)); i++)
-        es_fprintf (conn->stream, "# %s %11.4f - %s\n",
-                    name, rate, desc);
+        write_rem_linef (conn->stream, "%s %11.4f - %s",
+                         name, rate, desc);
     }
   else if (has_leading_keyword (args, "version"))
     {
-      es_fputs ("OK " PACKAGE_VERSION "\n", conn->stream);
+      write_ok_linef (conn->stream, "%s", PACKAGE_VERSION);
     }
   else if (has_leading_keyword (args, "pid"))
     {
-      es_fprintf (conn->stream, "OK %u\n", (unsigned int)getpid());
+      write_ok_linef (conn->stream, "%u", (unsigned int)getpid());
     }
   else if (has_leading_keyword (args, "live"))
     {
       if (opt.livemode)
-        es_fprintf (conn->stream, "OK\n");
+        write_ok_line (conn->stream);
       else
-        es_fprintf (conn->stream, "ERR 179 (running in test mode)\n");
+        write_err_line (179, "running in test mode", conn->stream);
     }
   else
     {
-      es_fputs ("ERR 1 (Unknown sub-command)\n"
-                "# Supported sub-commands are:\n"
-                "#   list-currencies    List supported currencies\n"
-                "#   version            Show the version of this daemon\n"
-                "#   pid                Show the pid of this process\n"
-                "#   live               Returns OK if in live mode\n"
-                , conn->stream);
+      write_err_line (1, "Unknown sub-command", conn->stream);
+      write_rem_line ("Supported sub-commands are:", conn->stream);
+      write_rem_line ("  list-currencies    List supported currencies",
+                      conn->stream);
+      write_rem_line ("  version            Show the version of this daemon",
+                      conn->stream);
+      write_rem_line ("  pid                Show the pid of this process",
+                      conn->stream);
+      write_rem_line ("  live               Returns OK if in live mode",
+                      conn->stream);
     }
 
   return 0;
@@ -1201,13 +1273,10 @@ cmd_getinfo (conn_t conn, char *args)
 static gpg_error_t
 cmd_ping (conn_t conn, char *args)
 {
-  if (*args)
-    es_fprintf (conn->stream, "OK %s\n",args);
-  else
-    es_fputs ("OK pong\n", conn->stream);
-
+  write_ok_linef (conn->stream, "%s", *args? args : "pong");
   return 0;
 }
+
 
 /* Process a SHUTDOWN command.  */
 static gpg_error_t
@@ -1215,7 +1284,7 @@ cmd_shutdown (conn_t conn, char *args)
 {
   (void)args;
 
-  es_fputs ("OK terminating daemon\n", conn->stream);
+  write_ok_linef (conn->stream, "terminating daemon");
   shutdown_server ();
 
   return 0;
@@ -1259,9 +1328,9 @@ cmd_help (conn_t conn, char *args)
 
   (void)args;
 
-  es_fputs ("OK\n", conn->stream);
+  write_ok_line (conn->stream);
   for (cmdidx=0; cmdtbl[cmdidx].name; cmdidx++)
-    es_fprintf (conn->stream, "# %s\n", cmdtbl[cmdidx].name);
+    write_rem_line (cmdtbl[cmdidx].name, conn->stream);
 
   return 0;
 }
@@ -1290,7 +1359,7 @@ connection_handler (conn_t conn, uid_t uid)
   if (err)
     {
       log_error ("reading request failed: %s\n", gpg_strerror (err));
-      es_fprintf (conn->stream, "ERR %u %s\n", err, gpg_strerror (err));
+      write_err_line (err, NULL, conn->stream);
       return;
     }
   es_fflush (conn->stream);
@@ -1304,7 +1373,7 @@ connection_handler (conn_t conn, uid_t uid)
       if (!(i < opt.n_allowed_uids))
         {
           err = gpg_error (GPG_ERR_EPERM);
-          es_fprintf (conn->stream, "ERR %u (User not allowed)\n", err);
+          write_err_line (err, "User not allowed", conn->stream);
         }
     }
 
@@ -1325,20 +1394,31 @@ connection_handler (conn_t conn, uid_t uid)
               if (!(i < opt.n_allowed_admin_uids))
                 {
                   err = gpg_error (GPG_ERR_FORBIDDEN);
-                  es_fprintf (conn->stream,
-                              "ERR %u (User is not an admin)\n", err);
+                  write_err_line (err, "User is not an admin", conn->stream);
                 }
             }
 
           if (!err)
-            err = cmdtbl[cmdidx].handler (conn, cmdargs);
+            {
+              if (opt.debug_client)
+                {
+                  log_debug ("client-req: %s\n", conn->command);
+                  for (kv = conn->dataitems; kv; kv = kv->next)
+                    log_debug ("client-req: %s: %s\n", kv->name, kv->value);
+                  log_debug ("client-req: \n");
+                }
+              err = cmdtbl[cmdidx].handler (conn, cmdargs);
+
+            }
         }
       else
         {
-          es_fprintf (conn->stream, "ERR 1 (Unknown command)\n");
-          es_fprintf (conn->stream, "_cmd: %s\n", conn->command);
+          write_err_line (1, "Unknown command", conn->stream);
+          write_data_line_direct ("_cmd", conn->command? conn->command :"",
+                                  conn->stream);
           for (kv = conn->dataitems; kv; kv = kv->next)
-            es_fprintf (conn->stream, "%s: %s\n", kv->name, kv->value);
+            write_data_line_direct (kv->name, kv->value? kv->value:"",
+                                    conn->stream);
         }
     }
 

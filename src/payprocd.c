@@ -94,6 +94,7 @@ enum opt_values
     oAdminGID,
     oDatabaseKey,
     oBackofficeKey,
+    oDebugClient,
     oDebugStripe,
 
     oLast
@@ -126,6 +127,7 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_s_s (oBackofficeKey,
                 "backoffice-key", "|FPR|public key for the backoffice"),
 
+  ARGPARSE_s_n (oDebugClient, "debug-client", "debug I/O with the client"),
   ARGPARSE_s_n (oDebugStripe, "debug-stripe", "debug the Stripe REST"),
 
   ARGPARSE_end ()
@@ -354,6 +356,7 @@ parse_options (int argc, char **argv)
       switch (pargs.r_opt)
         {
         case oVerbose:  opt.verbose++; break;
+        case oDebugClient: opt.debug_client++; break;
         case oDebugStripe: opt.debug_stripe++; break;
         case oNoDetach: opt.nodetach = 1; break;
         case oLogFile:  logfile = pargs.r.ret_str; break;
