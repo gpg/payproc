@@ -61,10 +61,9 @@
 #include "payprocd.h"
 #include "journal.h"
 #include "membuf.h"
+#include "dbutil.h"
 #include "preorder.h"
 
-
-#define DB_DATETIME_SIZE 20 /* "1970-01-01 12:00:00" */
 
 
 /* The name of the preorder database file.  */
@@ -137,39 +136,6 @@ make_sepa_ref (char *buffer, size_t bufsize)
   buffer [7] = '0' + i % 10;
   buffer [8] = 0;
 }
-
-
-/* Given a buffer of size DB_DATETIME_SIZE put the current time into it.  */
-static char *
-db_datetime_now (char *buffer)
-{
-#if DB_DATETIME_SIZE != TIMESTAMP_SIZE + 4
-# error mismatching timestamp sizes
-#endif
-  get_current_time (buffer);
-  /* "19700101T120000" to
-     "1970-01-01 12:00:00" */
-  buffer[19] = 0;
-  buffer[18] = buffer[14];
-  buffer[17] = buffer[13];
-  buffer[16] = ':';
-  buffer[15] = buffer[12];
-  buffer[14] = buffer[11];
-  buffer[13] = ':';
-  buffer[12] = buffer[10];
-  buffer[11] = buffer[9];
-  buffer[10] = ' ';
-  buffer[9] = buffer[7];
-  buffer[8] = buffer[6];
-  buffer[7] = '-';
-  buffer[6] = buffer[5];
-  buffer[5] = buffer[4];
-  buffer[4] = '-';
-
-  return buffer;
-}
-
-
 
 
 /* Relinquishes the lock on the database handle and if DO_CLOSE is
