@@ -60,6 +60,7 @@ payprocd_SOURCES = \
 	cred.c cred.h \
 	journal.c journal.h \
 	preorder.c preorder.h \
+	account.c account.h \
 	encrypt.c encrypt.h \
 	session.c session.h \
 	$(common_headers) \

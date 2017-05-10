@@ -31,6 +31,7 @@
 #include "cJSON.h"
 #include "payprocd.h"
 #include "form.h"
+#include "account.h"
 #include "stripe.h"
 
 
@@ -654,7 +655,7 @@ stripe_find_create_plan (keyvalue_t *dict)
  *
  * On success the following items are inserted/updated:
  *
- *  xxxx:
+ * account-id: Our account ID for the Stripe customer.
  */
 gpg_error_t
 stripe_create_subscription (keyvalue_t *dict)
@@ -662,12 +663,12 @@ stripe_create_subscription (keyvalue_t *dict)
   gpg_error_t err;
   int status;
   keyvalue_t request = NULL;
+  keyvalue_t accountdict = NULL;
   cjson_t json = NULL;
   const char *s;
   cjson_t j_obj;
-  int recur;
-  char *plan_id = NULL;
-  char *customer_id = NULL;
+  char *customer_id = NULL; /* The Stripe customer id.  */
+  char *account_id = NULL;  /* Our account id. */
 
   /* First check that we have all required data. */
   s = keyvalue_get_string (*dict, "_plan-id");
@@ -697,7 +698,7 @@ stripe_create_subscription (keyvalue_t *dict)
 
   /* FIXME: Figure out whether we already have a customer with the a
    * verified mail address and print a warning that a subscription
-   * already exists and can be chnaged using the account manager.  */
+   * already exists and can be changed using the account manager.  */
 
   /* Create a customer.  */
   err = call_stripe (opt.stripe_secret_key,
@@ -716,9 +717,7 @@ stripe_create_subscription (keyvalue_t *dict)
       goto leave;
     }
 
-  /* Create a scubscription.  */
-
-  /* Get the customer ID and put it into the request.  */
+  /* Get the customer ID and put it right away into the request.  */
   j_obj = cJSON_GetObjectItem (json, "id");
   if (!j_obj || !cjson_is_string (j_obj))
     {
@@ -726,15 +725,31 @@ stripe_create_subscription (keyvalue_t *dict)
       err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  err = keyvalue_put (&request, "customer", j_obj->valuestring);
-  if (err)
-    goto leave;
+
+  customer_id = xtrystrdup (j_obj->valuestring);
+  if (!customer_id)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
   /* We don't need the result anymore.  */
   cJSON_Delete (json);
   json = NULL;
 
+  /* Create a new empty account for the customer.  */
+  err = account_new_record (&account_id);
+  if (err)
+    goto leave;
+
+  /* Create the subscription.  */
+
   /* Remove the email from the request.  */
   keyvalue_del (request, "email");
+
+  /* Put the customer into the request.  */
+  err = keyvalue_put (&request, "customer", customer_id);
+  if (err)
+    goto leave;
 
   /* Add the token to the request and then delete it from the
    * dictionary.  It is supposed to be one-time and we do not want to
@@ -778,9 +793,26 @@ stripe_create_subscription (keyvalue_t *dict)
       goto leave;
     }
 
+  /* Add our account id to the result.  */
+  err = keyvalue_put (dict, "account-id", account_id);
+  if (err)
+    goto leave;
+
+  err = keyvalue_put (&accountdict, "account-id", account_id);
+  if (err)
+    goto leave;
+  err = keyvalue_put (&accountdict, "_stripe_cus", customer_id);
+  if (err)
+    goto leave;
+  err = account_update_record (accountdict);
+  if (err)
+    goto leave;
+
 
  leave:
+  xfree (account_id);
   xfree (customer_id);
+  keyvalue_release (accountdict);
   keyvalue_release (request);
   cJSON_Delete (json);
   return err;
