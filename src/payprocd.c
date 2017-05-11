@@ -648,6 +648,16 @@ create_socket (const char *name)
       exit (2);
     }
 
+  if (chmod (name, (S_IRUSR | S_IWUSR | S_IXUSR
+                    | S_IRGRP | S_IWGRP | S_IXGRP)))
+    {
+      log_error ("can't set permissions of '%s': %s\n",
+                 name, gpg_strerror (gpg_error_from_syserror ()));
+      close (fd);
+      remove (name);
+      exit (2);
+    }
+
   if (listen (fd, 5 ) == -1)
     {
       log_error ("listen call failed: %s\n",
