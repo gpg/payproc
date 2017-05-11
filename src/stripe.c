@@ -801,6 +801,17 @@ stripe_create_subscription (keyvalue_t *dict)
       goto leave;
     }
 
+  j_obj = cJSON_GetObjectItem (json, "livemode");
+  if (!j_obj || !(cjson_is_boolean (j_obj)))
+    {
+      log_error ("create_subscription: bad or missing 'livemode'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  err = keyvalue_put (dict, "Live", cjson_is_true (j_obj)?"t":"f");
+  if (err)
+    goto leave;
+
   /* Add our account id to the result.  */
   err = keyvalue_put (dict, "account-id", account_id);
   if (err)
