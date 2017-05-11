@@ -1168,17 +1168,6 @@ cmd_checkamount (conn_t conn, char *args)
   if (err)
     goto leave;
 
-  /* Make sure a plan exists.  Not really necessary, but it provides a
-   * nice interface to create plans for testing.  */
-  if (recur)
-    {
-      err = stripe_find_create_plan (&conn->dataitems);
-      dict = conn->dataitems;
-      if (err)
-        goto leave;
-    }
-
-
  leave:
   if (err)
     {
@@ -1188,8 +1177,6 @@ cmd_checkamount (conn_t conn, char *args)
     {
       write_ok_line (conn->stream);
       write_data_line (keyvalue_find (conn->dataitems, "_amount"),
-                       conn->stream);
-      write_data_line (keyvalue_find (conn->dataitems, "_plan-id"),
                        conn->stream);
     }
   for (kv = conn->dataitems; kv; kv = kv->next)
