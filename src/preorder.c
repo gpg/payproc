@@ -825,7 +825,7 @@ preorder_update_record (keyvalue_t newdata)
 
   /* FIXME: Unfortunately the journal function creates its own
      timestamp.  */
-  jrnl_store_charge_record (&olddata, PAYMENT_SERVICE_SEPA);
+  jrnl_store_charge_record (&olddata, PAYMENT_SERVICE_SEPA, 0);
 
 
  leave:

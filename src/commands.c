@@ -518,6 +518,7 @@ cmd_cardtoken (conn_t conn, char *args)
  * Amount:     The charged amount with optional decimal fraction.
  * Recur:      0 or the Recur value.  To cope with too small amounts,
  *             this and then also Amount may be changed from the request.
+ * account-id: Our account id for recurring payments
  * _timestamp: The timestamp as written to the journal
  *
  */
@@ -626,10 +627,7 @@ cmd_chargecard (conn_t conn, char *args)
   if (err)
     goto leave;
 
-  if (recur)
-    ;
-  else
-    jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_STRIPE);
+  jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_STRIPE, recur);
 
  leave:
   if (err)
@@ -645,6 +643,7 @@ cmd_chargecard (conn_t conn, char *args)
   for (kv = conn->dataitems; kv; kv = kv->next)
     if (kv->name[0] >= 'A' && kv->name[0] < 'Z')
       write_data_line (kv, conn->stream);
+  write_data_line (keyvalue_find (conn->dataitems, "account-id"), conn->stream);
   if (!err)
     write_data_line (keyvalue_find (conn->dataitems, "_timestamp"),
                      conn->stream);
@@ -760,7 +759,7 @@ cmd_ppcheckout (conn_t conn, char *args)
       if (err)
         goto leave;
       dict = conn->dataitems;
-      jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_PAYPAL);
+      jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_PAYPAL, 0);
       dict = conn->dataitems;
     }
   else

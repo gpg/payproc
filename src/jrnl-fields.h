@@ -36,9 +36,10 @@ enum jrnl_fields
     JRNL_FIELD_CHARGEID = 11, /* Charge id.                             */
     JRNL_FIELD_RTXID    = 12, /* Transaction id.                        */
     JRNL_FIELD_TXID     = 13, /* Reference txid.                        */
-    JRNL_FIELD_EURO     = 14  /* Amount converted to Euro.              */
+    JRNL_FIELD_EURO     = 14, /* Amount converted to Euro.              */
+    JRNL_FIELD_RECUR    = 15  /* Recurrence count.                      */
   };
-#define NO_OF_JRNL_FIELDS 15
+#define NO_OF_JRNL_FIELDS 16
 
 #define JRNL_FIELD_NAME_DATE     "date"
 #define JRNL_FIELD_NAME_TYPE     "type"
@@ -55,6 +56,7 @@ enum jrnl_fields
 #define JRNL_FIELD_NAME_TXID     "txid"
 #define JRNL_FIELD_NAME_RTXID    "rtxid"
 #define JRNL_FIELD_NAME_EURO     "euro"
+#define JRNL_FIELD_NAME_RECUR    "recur"
 
 
 #endif /*JRNL_FIELDS_H*/

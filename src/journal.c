@@ -38,6 +38,7 @@
    |    |          | $ := system record                             |
    |    |          | C := credit card charge                        |
    |    |          | R := credit card refund                        |
+   |    |          | S := new subscription                          |
    |    |          | M := manual added payment                      |
    |  3 | live     | 1 if this is not a test account                |
    |  4 | currency | 3 letter ISO code for the currency (lowercase) |
@@ -53,7 +54,10 @@
    | 13 | txid     | Transaction id                                 |
    | 14 | rtxid    | Reference txid (e.g. for refunds)              |
    |    |          | For preorders, this is the Sepa-Ref            |
+   |    |          | For subscriptions this is our account id       |
    | 15 | euro     | amount converted to Euro                       |
+   | 16 | recur    | For type=S: Recurrence indicator               |
+   |    |          | (0=none, 1=yearly, 4=quarterly, 12=monthly)    |
    |----+----------+------------------------------------------------|
 
    Because of the multithreaded operation it may happen that records
@@ -239,14 +243,17 @@ jrnl_store_exchange_rate_record (const char *currency, double rate)
 }
 
 
-/* Create a new record and spool it.  There is no error return because
-   the actual transaction has already happened and we want to make
-   sure to write that to the journal.  If we can't do that, we better
-   stop the process to limit the number of records lost.  I consider
-   it better to have a non-working web form than to have too many non
-   recorded transaction.  Adds "_timestamp" record into DICT.  */
+/* Create a new record and spool it.  DICTP ist the address of the
+ * data dictionary.  SERVICE is the payment service type.  If RECUR is
+ * non-zero a subscription instead of a charge is file.  There is no
+ * error return because the actual transaction has already happened
+ * and we want to make sure to write that to the journal.  If we can't
+ * do that, we better stop the process to limit the number of records
+ * lost.  I consider it better to have a non-working web form than to
+ * have too many non recorded transaction.  Adds "_timestamp" record
+ * into DICT.  */
 void
-jrnl_store_charge_record (keyvalue_t *dictp, int service)
+jrnl_store_charge_record (keyvalue_t *dictp, int service, int recur)
 {
   estream_t fp;
   char timestamp[TIMESTAMP_SIZE];
@@ -254,7 +261,7 @@ jrnl_store_charge_record (keyvalue_t *dictp, int service)
   const char *curr, *amnt;
   char amountbuf[AMOUNTBUF_SIZE];
 
-  fp = start_record ('C', timestamp);
+  fp = start_record (recur? 'S':'C', timestamp);
   keyvalue_put (dictp, "_timestamp", timestamp);
   dict = *dictp;
   es_fprintf (fp, "%d:", (*keyvalue_get_string (dict, "Live") == 't'));
@@ -275,11 +282,16 @@ jrnl_store_charge_record (keyvalue_t *dictp, int service)
   es_putc (':', fp);
   write_escaped (keyvalue_get_string (dict, "balance-transaction"), fp);
   es_putc (':', fp);
+
   if (service == PAYMENT_SERVICE_SEPA)
     write_escaped (keyvalue_get_string (dict, "Sepa-Ref"), fp);
+  else if (recur)
+    write_escaped (keyvalue_get_string (dict, "account-id"), fp);
   es_fputs (":", fp);   /* rtxid */
+
   es_fputs (convert_currency (amountbuf, sizeof amountbuf, curr, amnt), fp);
   es_fputs (":", fp);   /* euro */
+  es_fprintf (fp, "%d:", recur);  /* recur */
 
   write_and_close_fp (fp);
 }

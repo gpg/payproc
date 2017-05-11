@@ -30,7 +30,7 @@
 void jrnl_set_file (const char *fname);
 void jrnl_store_sys_record (const char *text);
 void jrnl_store_exchange_rate_record (const char *currency, double rate);
-void jrnl_store_charge_record (keyvalue_t *dictp, int service);
+void jrnl_store_charge_record (keyvalue_t *dictp, int service, int recur);
 
 
 #endif /*JOURNAL_H*/

@@ -24,7 +24,7 @@
   YEAR and MONTH and with no duplicate values.  Each line describes
   statistics for the indicated year and month.  The line format is:
 
-    YEAR:MONTH:X1:TAG:TAGLNR:X2:N:EURO:NYR:EUROYR:
+    YEAR:MONTH:X1:TAG:TAGLNR:X2:N:EURO:NYR:EUROYR:S:SUBS:SYR:SUBSYR
 
   YEAR  - the year (eg. 2014)
   MONTH - the month (1..12, with or without a leading zero)
@@ -38,7 +38,10 @@
   EURO  - The total amount from the charge records in that month.
   NYR   - The number of charge records in that year
   EUROYR- The total amount in that year up to this month.
-
+  S     - The number of subscription records in that month
+  SUBS  - The pledged Euro amount projected to a year in that month.
+  SYR   - The number of subscription records in that year
+  SUBSYR- The pledged Euro amount projected to a year in that year.
  */
 
 
@@ -103,7 +106,8 @@ static char *jrnl_field_names[] =
     JRNL_FIELD_NAME_CHARGEID,
     JRNL_FIELD_NAME_TXID,
     JRNL_FIELD_NAME_RTXID,
-    JRNL_FIELD_NAME_EURO
+    JRNL_FIELD_NAME_EURO,
+    JRNL_FIELD_NAME_RECUR
   };
 
 
@@ -149,7 +153,7 @@ static struct
 } opt;
 
 
-/* Maximum lenbth of the tag without the line number.  */
+/* Maximum length of the tag without the line number.  */
 #define MAX_TAGLEN 20
 
 /* Structure for an output record.  */
@@ -163,6 +167,12 @@ struct stat_record_s
   unsigned int nyr;
   unsigned long euroyr;
   unsigned long centyr;
+  unsigned int subs_n;
+  unsigned long subs_euro;
+  unsigned long subs_cent;
+  unsigned int subs_nyr;
+  unsigned long subs_euroyr;
+  unsigned long subs_centyr;
   char tag[MAX_TAGLEN+1];
   unsigned int taglnr;
   int update;      /* Set if initialized by read_stat_file.  */
@@ -653,10 +663,12 @@ one_line (const char *fname, unsigned int lnr, const char *tag, char *line)
 {
   char *field[NO_OF_JRNL_FIELDS];
   int nfields = 0;
+  char dummyfield[1] = { 0 };
   int year, month;
   const char *s;
   unsigned long euro, cent;
   stat_record_t rec;
+  int is_subs;
 
   /* Parse into fields.  */
   while (line && nfields < DIM(field))
@@ -672,13 +684,21 @@ one_line (const char *fname, unsigned int lnr, const char *tag, char *line)
                  fname, lnr);
       return -1;
     }
+  /* Set remaining field slots to the empty string.  */
+  while (nfields < DIM(field))
+    field[nfields++] = dummyfield;
 
-  if (strcmp (field[JRNL_FIELD_TYPE], "C"))
-    return 0;  /* We only care about charge records.  */
+
+  if (!strcmp (field[JRNL_FIELD_TYPE], "C"))
+    is_subs = 0;
+  else if (!strcmp (field[JRNL_FIELD_TYPE], "S"))
+    is_subs = 1;
+  else
+    return 0;  /* Ignore other records.  */
 
   if (nfields <= JRNL_FIELD_EURO)
     {
-      log_error ("%s:%u: no \"euro\" field in charge record\n", fname, lnr);
+      log_error ("%s:%u: no \"euro\" field in record\n", fname, lnr);
       return -1;
     }
 
@@ -699,6 +719,21 @@ one_line (const char *fname, unsigned int lnr, const char *tag, char *line)
   s = strchr (s, '.');
   cent = s? strtoul (s+1, NULL, 10) : 0;
 
+  if (is_subs)
+    {
+      int recur = atoi (field[JRNL_FIELD_RECUR]);
+      if (recur < 1)
+        {
+          log_info ("%s:%u: bad 'Recur' in subscription record - skipped\n",
+                    fname, lnr);
+          return 0;
+        }
+      euro *= recur;
+      cent *= recur;
+      euro += cent / 100;
+      cent %= 100;
+    }
+
   rec = find_stat_record (year, month);
   if (rec->update)
     {
@@ -710,9 +745,18 @@ one_line (const char *fname, unsigned int lnr, const char *tag, char *line)
         {
           strcpy (rec->tag, tag);
           rec->taglnr = lnr;
-          rec->n++;
-          rec->euro += euro;
-          rec->cent += cent;
+          if (is_subs)
+            {
+              rec->subs_n++;
+              rec->subs_euro += euro;
+              rec->subs_cent += cent;
+            }
+          else
+            {
+              rec->n++;
+              rec->euro += euro;
+              rec->cent += cent;
+            }
         }
     }
   else /* Standard mode or new year/month in update mode. */
@@ -735,9 +779,18 @@ one_line (const char *fname, unsigned int lnr, const char *tag, char *line)
           rec->taglnr = lnr;
         }
 
-      rec->n++;
-      rec->euro += euro;
-      rec->cent += cent;
+      if (is_subs)
+        {
+          rec->subs_n++;
+          rec->subs_euro += euro;
+          rec->subs_cent += cent;
+        }
+      else
+        {
+          rec->n++;
+          rec->euro += euro;
+          rec->cent += cent;
+        }
     }
 
   recordcount++;
@@ -822,13 +875,15 @@ one_file (const char *fname)
 static int
 read_stat_line (const char *fname, unsigned int lnr, char *line)
 {
-  char *field[12];
+  char *field[16];
+  char dummyfield[1] = { 0 };
   int nfields = 0;
   int year, month;
   const char *s;
   const char *tag;
   unsigned int taglnr;
   unsigned long euro, cent, euroyr, centyr;
+  unsigned long subs_euro, subs_cent, subs_euroyr, subs_centyr;
   stat_record_t rec;
 
   /* Parse into fields.  */
@@ -845,6 +900,10 @@ read_stat_line (const char *fname, unsigned int lnr, char *line)
                  fname, lnr);
       return -1;
     }
+  /* Set remaining field slots to the empty string.  */
+  while (nfields < DIM(field))
+    field[nfields++] = dummyfield;
+
 
   year  = atoi (field[0]);
   month = atoi (field[1]);
@@ -873,6 +932,16 @@ read_stat_line (const char *fname, unsigned int lnr, char *line)
   s = strchr (s, '.');
   centyr = s? strtoul (s+1, NULL, 10) : 0;
 
+  s = field[11];
+  subs_euro = strtoul (s, NULL, 10);
+  s = strchr (s, '.');
+  subs_cent = s? strtoul (s+1, NULL, 10) : 0;
+
+  s = field[13];
+  subs_euroyr = strtoul (s, NULL, 10);
+  s = strchr (s, '.');
+  subs_centyr = s? strtoul (s+1, NULL, 10) : 0;
+
   rec = find_stat_record (year, month);
   /* We always expect a new clean record - if not the input file has a
      double year/month line.  */
@@ -890,14 +959,20 @@ read_stat_line (const char *fname, unsigned int lnr, char *line)
   rec->nyr = strtoul (field[8], NULL, 10);
   rec->euroyr = euroyr;
   rec->centyr = centyr;
+  rec->subs_n = strtoul (field[10], NULL, 10);
+  rec->subs_euro = subs_euro;
+  rec->subs_cent = subs_cent;
+  rec->subs_nyr = strtoul (field[12], NULL, 10);
+  rec->subs_euroyr = subs_euroyr;
+  rec->subs_centyr = subs_centyr;
   rec->update = 1;
 
   return 0;
 }
 
 
-/* Read an existing stat file and records its values in the
-   statrecords.  */
+/* Read an existing stat file and record its values in the
+ * statrecords.  */
 static void
 read_stat_file (const char *fname)
 {
@@ -979,30 +1054,38 @@ postprocess_statrecords (void)
   int year;
   unsigned int nyr;
   unsigned long euroyr, centyr;
+  unsigned int subs_nyr;
+  unsigned long subs_euroyr, subs_centyr;
 
   qsort (statrecords, DIM(statrecords),
          sizeof *statrecords, sort_statrecords_cmp);
 
   /* Insert the totals per year.  */
-  nyr = 0;
-  euroyr = centyr = 0;
+  nyr = subs_nyr = 0;
+  euroyr = centyr = subs_euroyr = subs_centyr = 0;
   year = 0;
   for (i=0; i < DIM (statrecords); i++)
     if ((rec = statrecords + i), rec->year)
       {
         if (rec->year != year)
           {
-            nyr = 0;
-            euroyr = centyr = 0;
+            nyr = subs_nyr = 0;
+            euroyr = centyr = subs_euroyr = subs_centyr = 0;
             year = rec->year;
           }
         nyr += rec->n;
         euroyr += rec->euro;
         centyr += rec->cent;
+        subs_nyr += rec->subs_n;
+        subs_euroyr += rec->subs_euro;
+        subs_centyr += rec->subs_cent;
 
         rec->nyr = nyr;
         rec->euroyr = euroyr;
         rec->centyr = centyr;
+        rec->subs_nyr = subs_nyr;
+        rec->subs_euroyr = subs_euroyr;
+        rec->subs_centyr = subs_centyr;
       }
 
   /* The output shall be in reverse chronological order.  */
@@ -1017,6 +1100,7 @@ print_output (void)
   int i;
   stat_record_t rec;
   unsigned long euro, cent, euroyr, centyr;
+  unsigned long subs_euro, subs_cent, subs_euroyr, subs_centyr;
 
   for (i=0; i < DIM (statrecords); i++)
     if ((rec = statrecords + i), rec->year)
@@ -1029,10 +1113,23 @@ print_output (void)
         centyr = rec->centyr;
         euroyr += centyr / 100;
         centyr %= 100;
-        printf ("%d:%02d::%s:%u::%u:%lu.%02lu:%u:%lu.%02lu:\n",
+        subs_euro = rec->subs_euro;
+        subs_cent = rec->subs_cent;
+        subs_euro += subs_cent / 100;
+        subs_cent %= 100;
+        subs_euroyr = rec->subs_euroyr;
+        subs_centyr = rec->subs_centyr;
+        subs_euroyr += subs_centyr / 100;
+        subs_centyr %= 100;
+        printf ("%d:%02d::%s:%u::"
+                "%u:%lu.%02lu:%u:%lu.%02lu:"
+                "%u:%lu.%02lu:%u:%lu.%02lu:"
+                "\n",
                 rec->year, rec->month, rec->tag, rec->taglnr,
                 rec->n, euro, cent,
-                rec->nyr, euroyr, centyr);
+                rec->nyr, euroyr, centyr,
+                rec->subs_n, subs_euro, subs_cent,
+                rec->subs_nyr, subs_euroyr, subs_centyr);
       }
 
   if (fflush (stdout) == EOF)
