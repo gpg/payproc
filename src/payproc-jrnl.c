@@ -84,7 +84,8 @@ static char *jrnl_field_names[] =
     JRNL_FIELD_NAME_CHARGEID,
     JRNL_FIELD_NAME_TXID,
     JRNL_FIELD_NAME_RTXID,
-    JRNL_FIELD_NAME_EURO
+    JRNL_FIELD_NAME_EURO,
+    JRNL_FIELD_NAME_RECUR
   };
 
 
