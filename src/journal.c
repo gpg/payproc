@@ -128,6 +128,7 @@ write_log (const char *buffer)
       logfile.suffix[8] = 0;
 
       xfree (logfile.fullname);
+      logfile.fullname = NULL;
       logfile.fullname = strconcat (logfile.basename, "-", logfile.suffix,
                                     ".log", NULL);
       if (!logfile.fullname || !(logfile.fp = fopen (logfile.fullname, "a")))

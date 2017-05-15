@@ -248,6 +248,7 @@ write_rem_linef (estream_t fp, const char *format, ...)
   es_fprintf (fp, "# %s\n", buffer? buffer : "[out of core]");
   if (opt.debug_client)
     log_debug ("client-rsp: # %s\n", buffer? buffer : "[out of core]");
+  es_free (buffer);
 }
 
 

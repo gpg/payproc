@@ -492,14 +492,12 @@ keyvalue_put_idx (keyvalue_t *list, const char *key, int idx, const char *value)
 }
 
 
-
 gpg_error_t
 keyvalue_del (keyvalue_t list, const char *key)
 {
   /* LIST won't change due to the del operation.  */
   return keyvalue_put (&list, key, NULL);
 }
-
 
 
 gpg_error_t
@@ -519,10 +517,10 @@ keyvalue_putf (keyvalue_t *list, const char *key, const char *format, ...)
     return gpg_error_from_syserror ();
 
   err = keyvalue_put (list, key, value);
-  if (err)
-    es_free (value);
+  es_free (value);
   return err;
 }
+
 
 /* Store STRING as "Meta" field at LIST.  */
 gpg_error_t
@@ -587,6 +585,7 @@ keyvalue_release (keyvalue_t kv)
     {
       keyvalue_t nxt = kv->next;
       xfree (kv->value);
+      xfree (kv);
       kv = nxt;
     }
 }

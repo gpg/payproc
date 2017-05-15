@@ -643,8 +643,8 @@ create_socket (const char *name)
       log_error ("error binding socket to '%s': %s\n",
 		 serv_addr->sun_path,
                  gpg_strerror (gpg_error_from_syserror()));
-
       close (fd);
+      xfree (serv_addr);
       exit (2);
     }
 
@@ -655,6 +655,7 @@ create_socket (const char *name)
                  name, gpg_strerror (gpg_error_from_syserror ()));
       close (fd);
       remove (name);
+      xfree (serv_addr);
       exit (2);
     }
 
@@ -663,8 +664,12 @@ create_socket (const char *name)
       log_error ("listen call failed: %s\n",
                  gpg_strerror (gpg_error_from_syserror()));
       close (fd);
+      remove (name);
+      xfree (serv_addr);
       exit (2);
     }
+
+  xfree (serv_addr);
 
   if (opt.verbose)
     log_info ("listening on socket '%s'\n", serv_addr->sun_path);
