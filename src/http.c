@@ -1520,7 +1520,7 @@ send_request (http_t hd, const char *httphost, const char *auth,
       gnutls_transport_set_push_function (hd->session->tls_session,
                                           my_npth_write);
 #endif
-
+    handshake_again:
       do
         {
           rc = gnutls_handshake (hd->session->tls_session);
@@ -1528,7 +1528,26 @@ send_request (http_t hd, const char *httphost, const char *auth,
       while (rc == GNUTLS_E_INTERRUPTED || rc == GNUTLS_E_AGAIN);
       if (rc < 0)
         {
-          log_info ("TLS handshake failed: %s\n", gnutls_strerror (rc));
+          if (rc == GNUTLS_E_WARNING_ALERT_RECEIVED
+              || rc == GNUTLS_E_FATAL_ALERT_RECEIVED)
+            {
+              gnutls_alert_description_t alertno;
+              const char *alertstr;
+
+              alertno = gnutls_alert_get (hd->session->tls_session);
+              alertstr = gnutls_alert_get_name (alertno);
+              log_info ("TLS handshake %s: %s (alert %d)\n",
+                        rc == GNUTLS_E_WARNING_ALERT_RECEIVED
+                        ? "warning" : "failed",
+                        alertstr, (int)alertno);
+              if (alertno == GNUTLS_A_UNRECOGNIZED_NAME && server)
+                log_info ("  (sent server name '%s')\n", server);
+
+              if (rc == GNUTLS_E_WARNING_ALERT_RECEIVED)
+                goto handshake_again;
+            }
+          else
+            log_info ("TLS handshake failed: %s\n", gnutls_strerror (rc));
           xfree (proxy_authstr);
           return gpg_err_make (default_errsource, GPG_ERR_NETWORK);
         }
@@ -2352,6 +2371,11 @@ cookie_read (void *cookie, void *buffer, size_t size)
             }
           if (nread == GNUTLS_E_REHANDSHAKE)
             goto again; /* A client is allowed to just ignore this request. */
+          if (nread == GNUTLS_E_PREMATURE_TERMINATION)
+            {
+              /* The server terminated the connection. */
+              return 0; /* EOF */
+            }
           log_info ("TLS network read failed: %s\n", gnutls_strerror (nread));
           gpg_err_set_errno (EIO);
           return -1;
