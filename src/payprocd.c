@@ -669,10 +669,10 @@ create_socket (const char *name)
       exit (2);
     }
 
-  xfree (serv_addr);
-
   if (opt.verbose)
     log_info ("listening on socket '%s'\n", serv_addr->sun_path);
+
+  xfree (serv_addr);
 
   return fd;
 }
