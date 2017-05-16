@@ -823,6 +823,12 @@ stripe_create_subscription (keyvalue_t *dict)
   err = keyvalue_put (&accountdict, "_stripe_cus", customer_id);
   if (err)
     goto leave;
+  if ((s = keyvalue_get (*dict, "Email")))
+    {
+      err = keyvalue_put (&accountdict, "Email", s);
+      if (err)
+        goto leave;
+    }
   err = account_update_record (accountdict);
   if (err)
     goto leave;

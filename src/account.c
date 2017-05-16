@@ -21,9 +21,11 @@
  *
  * CREATE TABLE account (
  *   account_id TEXT NOT NULL PRIMARY KEY,
- *   email TEXT,                       -- The mail address
  *   created TEXT NOT NULL,            -- Creation date
  *   updated TEXT NOT NULL,            -- Last Update
+ *   email TEXT,                       -- The mail address
+ *   verified INTEGER NOT NULL,        -- True when the mail
+ *                                        has has been verified
  *   stripe_cus TEXT,                  -- The encrypted customer id.
  *   meta TEXT       -- Copy of the meta data as put into the journal.
  *                   -- This is also encrypted using the database key.
@@ -187,6 +189,7 @@ open_account_db (void)
                             "CREATE TABLE IF NOT EXISTS account (\n"
                             "account_id TEXT NOT NULL PRIMARY KEY,\n"
                             "email      TEXT,\n"
+                            "verified   INTEGER NOT NULL,\n"
                             "created    TEXT NOT NULL,\n"
                             "updated    TEXT NOT NULL,\n"
                             "stripe_cus TEXT,\n"
@@ -213,7 +216,8 @@ open_account_db (void)
   /* Prepare an insert statement.  */
   res = sqlite3_prepare_v2
     (account_db,
-     "INSERT INTO account (account_id, created, updated) VALUES (?1,?2,?3)",
+     "INSERT INTO account (account_id, verified, created, updated)\n"
+     "            VALUES (?1,0,?2,?3)",
      -1, &stmt, NULL);
   if (res)
     {
@@ -228,7 +232,8 @@ open_account_db (void)
   res = sqlite3_prepare_v2 (account_db,
                             "UPDATE account SET"
                             " updated = ?2,"
-                            " stripe_cus = ?3"
+                            " stripe_cus = ?3,"
+                            " email = ?4"
                             " WHERE account_id=?1",
                             -1, &stmt, NULL);
   if (res)
@@ -308,8 +313,9 @@ new_account_record (char **r_account_id)
 }
 
 
-/* Update the row specified by 'account-id'.  Currently only the value
- * '_stripe_cus' is put encrypted into the column stripe_cus.  */
+/* Update the row specified by 'account-id'.  Currently the value
+ * '_stripe_cus' is put encrypted into the column stripe_cus and if
+ * available the value 'Email' is but into the column email.  */
 static gpg_error_t
 update_account_record (keyvalue_t dict)
 {
@@ -319,6 +325,7 @@ update_account_record (keyvalue_t dict)
   const char *account_id;
   const char *stripe_cus;
   char *enc_stripe_cus = NULL;
+  const char *email;
 
   account_id = keyvalue_get_string (dict, "account-id");
   if (!*account_id)
@@ -327,6 +334,8 @@ update_account_record (keyvalue_t dict)
       err = gpg_error (GPG_ERR_MISSING_VALUE);
       goto leave;
     }
+
+  email = keyvalue_get (dict, "Email");
 
   stripe_cus = keyvalue_get_string (dict, "_stripe_cus");
   if (!*stripe_cus)
@@ -357,6 +366,10 @@ update_account_record (keyvalue_t dict)
   if (!res)
     res = sqlite3_bind_text (account_update_stmt,
                              3, enc_stripe_cus, -1,
+                             SQLITE_TRANSIENT);
+  if (!res)
+    res = sqlite3_bind_text (account_update_stmt,
+                             4, email, -1,
                              SQLITE_TRANSIENT);
   if (res)
     {
