@@ -714,6 +714,15 @@ stripe_create_subscription (keyvalue_t *dict)
    * verified mail address and print a warning that a subscription
    * already exists and can be changed using the account manager.  */
 
+  /* Create a new empty account for the customer.  This data is also
+   * stored in Stripe's metadata item.  */
+  err = account_new_record (&account_id);
+  if (err)
+    goto leave;
+  err = keyvalue_put (&request, "metadata[account_id]", account_id);
+  if (err)
+    goto leave;
+
   /* Create a customer.  */
   err = call_stripe (opt.stripe_secret_key,
                      "customers", NULL, request, &status, &json);
@@ -746,11 +755,6 @@ stripe_create_subscription (keyvalue_t *dict)
   /* We don't need the result anymore.  */
   cJSON_Delete (json);
   json = NULL;
-
-  /* Create a new empty account for the customer.  */
-  err = account_new_record (&account_id);
-  if (err)
-    goto leave;
 
   /* Create the subscription.  */
 
