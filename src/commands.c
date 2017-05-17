@@ -655,54 +655,54 @@ cmd_chargecard (conn_t conn, char *args)
 
 
 /* The PPCHECKOUT does a PayPal transaction.  Depending on the
-   sub-command different data items are required.
-
-   The following sub-commands are available:
-
-   prepare
-
-     Start a checkout operation.  In this mode the data is collected,
-     and access code fetched from paypal and a redirect URL returned
-     to the caller.  Required data:
-
-     Amount:     The amount to charge with optional decimal fraction.
-     Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
-     Desc:       Optional description of the charge.
-     Meta[NAME]: Meta data further described by NAME.  This is used
-                 to convey application specific data to the log file.
-     Return-Url: URL to which Paypal redirects.
-     Cancel-Url: URL to which Paypal redirects on cancel.
-     Session-Id: Id of the session to be used for storing state.  If this
-                 is not given a new session will be created.
-     Paypal-Xp:  An optional Paypa Experience Id.
-
-     On success these items are returned:
-
-     _SESSID:    If Session-Id was not supplied the id of a new session
-                 is returned.
-     Redirect-Url: The caller must be redirected to this URL for further
-                   processing.
-
-   execute
-
-     Finish a Paypal checkout operation.  Required data:
-
-     Alias-Id:     The alias id used to access the state from the
-                   prepare command.  This should be retrieved from the
-                   Return-Url's "aliasid" parameter which has been
-                   appended to the Return-Url by the prepare sub-command.
-     Paypal-Payer: Returned by Paypal via the
-                   Return-Url's "PayerID" parameter.
-
-     On success these items are returned:
-
-     Charge-Id:  The ID describing this charge
-     Live:       Set to 'f' in test mode or 't' in live mode.
-     Currency:   The currency of the charge.
-     Amount:     The charged amount with optional decimal fraction.
-     Email:      The mail address as told by Paypal.
-     _timestamp: The timestamp as written to the journal
-
+ * sub-command different data items are required.
+ *
+ * The following sub-commands are available:
+ *
+ * prepare
+ *
+ *   Start a checkout operation.  In this mode the data is collected,
+ *   an access code fetched from paypal, and a redirect URL returned
+ *   to the caller.  Required data:
+ *
+ *   Amount:     The amount to charge with optional decimal fraction.
+ *   Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+ *   Desc:       Optional description of the charge.
+ *   Meta[NAME]: Meta data further described by NAME.  This is used
+ *               to convey application specific data to the log file.
+ *   Return-Url: URL to which Paypal redirects.
+ *   Cancel-Url: URL to which Paypal redirects on cancel.
+ *   Session-Id: Id of the session to be used for storing state.  If this
+ *               is not given a new session will be created.
+ *   Paypal-Xp:  An optional Paypal Experience Id.
+ *
+ *   On success these items are returned:
+ *
+ *   _SESSID:    If Session-Id was not supplied the id of a new session
+ *               is returned.
+ *   Redirect-Url: The caller must be redirected to this URL for further
+ *                 processing.
+ *
+ * execute
+ *
+ *   Finish a Paypal checkout operation.  Required data:
+ *
+ *   Alias-Id:     The alias id used to access the state from the
+ *                 prepare command.  This should be retrieved from the
+ *                 Return-Url's "aliasid" parameter which has been
+ *                 appended to the Return-Url by the prepare sub-command.
+ *   Paypal-Payer: Returned by Paypal via the
+ *                 Return-Url's "PayerID" parameter.
+ *
+ *   On success these items are returned:
+ *
+ *   Charge-Id:  The ID describing this charge
+ *   Live:       Set to 'f' in test mode or 't' in live mode.
+ *   Currency:   The currency of the charge.
+ *   Amount:     The charged amount with optional decimal fraction.
+ *   Email:      The mail address as told by Paypal.
+ *   _timestamp: The timestamp as written to the journal
+ *
  */
 static gpg_error_t
 cmd_ppcheckout (conn_t conn, char *args)

@@ -652,9 +652,8 @@ keyvalue_get_uint (keyvalue_t list, const char *key)
 
 
 /* Parse the www-form-urlencoded DATA into a new dictionary and store
-   that dictionary at R_DICT.  On error store NULL at R_DICT and
-   return an error code.  Note that STRING will be modified on
-   return. */
+ * that dictionary at R_DICT.  On error store NULL at R_DICT and
+ * return an error code.  */
 gpg_error_t
 parse_www_form_urlencoded (keyvalue_t *r_dict, const char *data)
 {

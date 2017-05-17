@@ -464,7 +464,7 @@ get_session_object (const char *sessid, session_t *r_sess)
    string with the alias is stored at R_ALIASID.  Note that only a few
    aliases may be created per session and that aliases are deleted
    with the session.  An alias is useful to reference a session to a
-   remote service without given the remove service the ability to take
+   remote service without given the remote service the ability to take
    over a session.  Obviously the alias id should only be used if it
    has been received from that service provider.  */
 gpg_error_t

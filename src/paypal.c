@@ -38,8 +38,8 @@
 #define PAYPAL_TEST_HOST "https://api.sandbox.paypal.com"
 #define PAYPAL_LIVE_HOST "https://api.paypal.com"
 
-/* Perform a call to paypal.  KEYSTRING is the colon delimted
-   concatenation of clieint_id and secret key, METHOD is the method
+/* Perform a call to paypal.  KEYSTRING is the colon delimited
+   concatenation of client_id and secret key, METHOD is the method
    without the version (e.g. "tokens") and DATA the individual part to
    be appended to the URL (e.g. a token-id).  If FORMDATA is not NULL,
    a POST operaion is used with that data instead of the default GET
@@ -72,7 +72,14 @@ call_paypal (int bearer, const char *authstring,
     goto leave;
 
   if (opt.debug_paypal)
-    log_debug ("paypal-req: %s %s\n", formdata? "POST" : "GET", url);
+    {
+      keyvalue_t kv;
+      log_debug ("paypal-req: %s %s\n", formdata? "POST" : "GET", url);
+      for (kv = kvformdata; kv; kv = kv->next)
+        log_printkeyval ("  ", kv->name, kv->value);
+      if (formdata)
+        log_printval ("  plain: ", formdata);
+    }
 
   err = http_open (&http,
                    kvformdata || formdata? HTTP_REQ_POST : HTTP_REQ_GET,
@@ -164,10 +171,10 @@ call_paypal (int bearer, const char *authstring,
     {
       char *tmp;
 
-      log_debug ("paypal-rsp: %3d (%s)", status, gpg_strerror (err));
+      log_debug ("paypal-rsp: %3d (%s)\n", status, gpg_strerror (err));
       tmp = cJSON_Print (*r_json);
       if (tmp)
-        log_printf ("\n%s\n", tmp);
+        log_printf ("%s\n", tmp);
       log_flush ();
       xfree (tmp);
     }
@@ -416,6 +423,65 @@ restore_field (keyvalue_t *targetp, keyvalue_t dict, const char *name)
 }
 
 
+/* Return a paypal OAUTH2 access token.  */
+static gpg_error_t
+get_access_token (char **r_access_token)
+{
+  gpg_error_t err;
+  int status;
+  keyvalue_t hlpdict = NULL;
+  cjson_t json = NULL;
+  cjson_t j_obj;
+
+  *r_access_token = NULL;
+
+  /* Ask for an access token.  */
+  err = keyvalue_put (&hlpdict, "grant_type", "client_credentials");
+  if (err)
+    goto leave;
+
+  err = call_paypal (0, opt.paypal_secret_key,
+                     "oauth2/token", NULL,
+                     hlpdict, NULL,
+                     &status, &json);
+  if (err)
+    goto leave;
+  if (status != 200)
+    {
+      log_error ("paypal: error getting access token: status=%u\n", status);
+      err = gpg_error (GPG_ERR_EPERM);
+      goto leave;
+    }
+  j_obj = cJSON_GetObjectItem (json, "token_type");
+  if (!j_obj || !cjson_is_string (j_obj)
+      || strcasecmp (j_obj->valuestring, "Bearer"))
+    {
+      log_error ("paypal: error getting access token: bad 'token_type'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+  j_obj = cJSON_GetObjectItem (json, "access_token");
+  if (!j_obj || !cjson_is_string (j_obj) || !*j_obj->valuestring)
+    {
+      log_error ("paypal: error getting access token: bad 'access_token'\n");
+      err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  *r_access_token = xtrystrdup (j_obj->valuestring);
+  if (!*r_access_token)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+
+ leave:
+  keyvalue_release (hlpdict);
+  cJSON_Delete (json);
+  return err;
+}
+
+
 /* The implementation of the PPCHECKOUT sub-command "prepare".  */
 gpg_error_t
 paypal_checkout_prepare (keyvalue_t *dict)
@@ -476,7 +542,6 @@ paypal_checkout_prepare (keyvalue_t *dict)
   if (*s && !strchr (s, '\"'))
     paypal_xp_snippet = es_bsprintf ("  \"experience_profile_id\": \"%s\",", s);
 
-
   /* Create an alias for the session.  */
   sessid = keyvalue_get_string (*dict, "Session-Id");
   err = session_create_alias (sessid, &aliasid);
@@ -484,51 +549,9 @@ paypal_checkout_prepare (keyvalue_t *dict)
     goto leave;
 
   /* Ask for an access token.  */
-  err = keyvalue_put (&hlpdict, "grant_type", "client_credentials");
+  err = get_access_token (&access_token);
   if (err)
     goto leave;
-
-  err = call_paypal (0, opt.paypal_secret_key,
-                     "oauth2/token", NULL,
-                     hlpdict, NULL,
-                     &status, &json);
-  if (err)
-    goto leave;
-  if (status != 200)
-    {
-      log_error ("paypal: error getting access token: status=%u\n", status);
-      log_debug ("Error:\n%s\n", cJSON_Print(json));
-      err = extract_error_from_json (dict, json);
-      if (!err)
-        err = gpg_error (GPG_ERR_GENERAL);
-      goto leave;
-    }
-  /* log_debug ("Result:\n%s\n", cJSON_Print(json)); */
-  j_obj = cJSON_GetObjectItem (json, "token_type");
-  if (!j_obj || !cjson_is_string (j_obj)
-      || strcasecmp (j_obj->valuestring, "Bearer"))
-    {
-      log_error ("paypal: error getting access token: bad 'token_type'\n");
-      err = gpg_error (GPG_ERR_GENERAL);
-      goto leave;
-    }
-
-  j_obj = cJSON_GetObjectItem (json, "access_token");
-  if (!j_obj || !cjson_is_string (j_obj) || !*j_obj->valuestring)
-    {
-      log_error ("paypal: error getting access token: bad 'access_token'\n");
-      err = gpg_error (GPG_ERR_GENERAL);
-      goto leave;
-    }
-  access_token = xtrystrdup (j_obj->valuestring);
-  if (!access_token)
-    {
-      err = gpg_error_from_syserror ();
-      goto leave;
-    }
-
-  cJSON_Delete (json);
-  json = NULL;
 
   /* Prepare the payment.  */
   request = es_bsprintf ("{ \"transactions\": [{"
@@ -571,17 +594,13 @@ paypal_checkout_prepare (keyvalue_t *dict)
   if (status != 200 && status != 201)
     {
       log_error ("paypal: error sending payment: status=%u\n", status);
-      log_debug ("Error:\n%s\n", cJSON_Print(json));
       err = extract_error_from_json (dict, json);
       if (!err)
         err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  /* log_debug ("Result:\n%s\n", cJSON_Print(json)); */
 
   /* Prepare a dictionary to collect the state.  */
-  keyvalue_release (hlpdict);
-  hlpdict = NULL;
 
   /* Get the payment id.  */
   j_obj = cJSON_GetObjectItem (json, "id");
@@ -723,13 +742,11 @@ paypal_checkout_execute (keyvalue_t *dict)
   if (status != 200 && status != 201)
     {
       log_error ("paypal: error executing payment: status=%u\n", status);
-      log_debug ("Error:\n%s\n", cJSON_Print(json));
       err = extract_error_from_json (dict, json);
       if (!err)
         err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  /* log_debug ("Result:\n%s\n", cJSON_Print(json)); */
 
   /* Prepare return values.  */
   err = keyvalue_put (dict, "Charge-Id", paypal_id);
