@@ -71,6 +71,9 @@ call_paypal (int bearer, const char *authstring,
   if (err)
     goto leave;
 
+  if (opt.debug_paypal)
+    log_debug ("paypal-req: %s %s\n", formdata? "POST" : "GET", url);
+
   err = http_open (&http,
                    kvformdata || formdata? HTTP_REQ_POST : HTTP_REQ_GET,
                    url,
@@ -156,6 +159,18 @@ call_paypal (int bearer, const char *authstring,
     }
   else
     err = gpg_error (GPG_ERR_NOT_FOUND);
+
+  if (opt.debug_paypal)
+    {
+      char *tmp;
+
+      log_debug ("paypal-rsp: %3d (%s)", status, gpg_strerror (err));
+      tmp = cJSON_Print (*r_json);
+      if (tmp)
+        log_printf ("\n%s\n", tmp);
+      log_flush ();
+      xfree (tmp);
+    }
 
  leave:
   http_close (http, 0);
@@ -477,7 +492,6 @@ paypal_checkout_prepare (keyvalue_t *dict)
                      "oauth2/token", NULL,
                      hlpdict, NULL,
                      &status, &json);
-  log_debug ("call_paypal => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
   if (status != 200)
@@ -552,7 +566,6 @@ paypal_checkout_prepare (keyvalue_t *dict)
                      "payments/payment", NULL,
                      NULL, request,
                      &status, &json);
-  log_debug ("call_paypal => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
   if (status != 200 && status != 201)
@@ -705,7 +718,6 @@ paypal_checkout_execute (keyvalue_t *dict)
                      method, NULL,
                      NULL, request,
                      &status, &json);
-  log_debug ("call_paypal => %s status=%d\n", gpg_strerror (err), status);
   if (err)
     goto leave;
   if (status != 200 && status != 201)

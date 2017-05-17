@@ -58,6 +58,9 @@ call_verify (int live, const char *request)
   if (err)
     goto leave;
 
+  if (opt.debug_paypal)
+    log_debug ("paypal-req: %s %s\n", "POST" , url);
+
   err = http_open (&http,
                    HTTP_REQ_POST,
                    url,
@@ -113,7 +116,9 @@ call_verify (int live, const char *request)
       goto leave;
     }
 
-  /* log_debug ("PayPal verification status '%s'\n", response); */
+  if (opt.debug_paypal)
+    log_debug ("paypal-rsp: %3d (%s) status='%.100s'\n",
+               status, gpg_strerror (err), response);
   err = !strcmp (response, "VERIFIED")? 0 : gpg_error (GPG_ERR_NOT_FOUND);
 
  leave:

@@ -96,6 +96,7 @@ enum opt_values
     oBackofficeKey,
     oDebugClient,
     oDebugStripe,
+    oDebugPaypal,
 
     oLast
   };
@@ -129,6 +130,7 @@ static ARGPARSE_OPTS opts[] = {
 
   ARGPARSE_s_n (oDebugClient, "debug-client", "debug I/O with the client"),
   ARGPARSE_s_n (oDebugStripe, "debug-stripe", "debug the Stripe REST"),
+  ARGPARSE_s_n (oDebugPaypal, "debug-paypal", "debug the PayPal REST"),
 
   ARGPARSE_end ()
 };
@@ -358,6 +360,7 @@ parse_options (int argc, char **argv)
         case oVerbose:  opt.verbose++; break;
         case oDebugClient: opt.debug_client++; break;
         case oDebugStripe: opt.debug_stripe++; break;
+        case oDebugPaypal: opt.debug_paypal++; break;
         case oNoDetach: opt.nodetach = 1; break;
         case oLogFile:  logfile = pargs.r.ret_str; break;
         case oNoLogFile: logfile = NULL; break;

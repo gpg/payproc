@@ -30,6 +30,7 @@ struct
   int nodetach;  /* Do not detach from the console.  */
   int debug_client;  /* Debug communication with the client.  */
   int debug_stripe;  /* Debug Stripe REST interaction.  */
+  int debug_paypal;  /* Debug PayPal REST interaction.  */
 
   int livemode;  /* Expect to be in live mode.  Default is test mode.  */
   char *stripe_secret_key;  /* The secret key for stripe.com */
