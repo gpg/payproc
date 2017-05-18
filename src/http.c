@@ -1611,7 +1611,7 @@ send_request (http_t hd, const char *httphost, const char *auth,
   if (http_proxy && *http_proxy)
     {
       request = gpgrt_bsprintf
-        ("%s %s://%s:%hu%s%s HTTP/1.0\r\n%s%s",
+        ("%s %s://%s:%hu%s%s HTTP/1.1\r\n%s%s",
          hd->req_type == HTTP_REQ_GET ? "GET" :
          hd->req_type == HTTP_REQ_HEAD ? "HEAD" :
          hd->req_type == HTTP_REQ_POST ? "POST" : "OOPS",
@@ -1631,7 +1631,7 @@ send_request (http_t hd, const char *httphost, const char *auth,
         snprintf (portstr, sizeof portstr, ":%u", port);
 
       request = es_bsprintf
-        ("%s %s%s HTTP/1.0\r\nHost: %s%s\r\n%s",
+        ("%s %s%s HTTP/1.1\r\nHost: %s%s\r\n%s",
          hd->req_type == HTTP_REQ_GET ? "GET" :
          hd->req_type == HTTP_REQ_HEAD ? "HEAD" :
          hd->req_type == HTTP_REQ_POST ? "POST" : "OOPS",
