@@ -22,7 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <npth.h>
+#include <time.h>
 
 #include "util.h"
 #include "logging.h"
@@ -78,7 +79,7 @@ call_paypal (int bearer, const char *authstring,
       for (kv = kvformdata; kv; kv = kv->next)
         log_printkeyval ("  ", kv->name, kv->value);
       if (formdata)
-        log_printval ("  plain: ", formdata);
+        log_printval ("        data: ", formdata);
     }
 
   err = http_open (&http,
@@ -427,18 +428,73 @@ restore_field (keyvalue_t *targetp, keyvalue_t dict, const char *name)
 static gpg_error_t
 get_access_token (char **r_access_token)
 {
+  static char *access_token;
+  static time_t expires_on = 60; /* Init so that gcc does not complain
+                                  * about the initial compare.  */
+  static npth_mutex_t my_lock = NPTH_MUTEX_INITIALIZER;
+
   gpg_error_t err;
   int status;
+  int max_retries = 10;
   keyvalue_t hlpdict = NULL;
   cjson_t json = NULL;
   cjson_t j_obj;
+  time_t request_time, now;
 
   *r_access_token = NULL;
+
+  {
+    int res = npth_mutex_lock (&my_lock);
+    if (res)
+      log_fatal ("paypal: failed to acquire access token lock: %s\n",
+                 gpg_strerror (gpg_error_from_errno (res)));
+  }
+
+ retry:
+  keyvalue_release (hlpdict); hlpdict = NULL;
+  cJSON_Delete (json); json = NULL;
+
+  now = time (NULL);
+  if (now == (time_t)(-1))
+    {
+      log_error ("time() failed: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      severe_error ();
+    }
+
+  /* Check whether we can use the last access token.  */
+  if (now + 30 < expires_on && access_token)
+    {
+      *r_access_token = xtrystrdup (access_token);
+      if (!*r_access_token)
+        err = gpg_error_from_syserror ();
+      else
+        err = 0; /* Success.  */
+      goto leave;
+    }
+
+  log_info ("paypal: cached access token: %s\n",
+            access_token? "expire time too close": "not yet cached");
+
+  if (!max_retries--)
+    {
+      log_error ("paypal: error getting access token: too many retries\n");
+      err = gpg_error (GPG_ERR_TIMEOUT);
+      goto leave;
+    }
 
   /* Ask for an access token.  */
   err = keyvalue_put (&hlpdict, "grant_type", "client_credentials");
   if (err)
     goto leave;
+
+  request_time = time (NULL);
+  if (request_time == (time_t)(-1))
+    {
+      log_error ("time() failed: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      severe_error ();
+    }
 
   err = call_paypal (0, opt.paypal_secret_key,
                      "oauth2/token", NULL,
@@ -468,14 +524,38 @@ get_access_token (char **r_access_token)
       err = gpg_error (GPG_ERR_GENERAL);
       goto leave;
     }
-  *r_access_token = xtrystrdup (j_obj->valuestring);
-  if (!*r_access_token)
+  xfree (access_token); access_token = NULL;
+  access_token = xtrystrdup (j_obj->valuestring);
+  if (!access_token)
     {
       err = gpg_error_from_syserror ();
       goto leave;
     }
 
+  j_obj = cJSON_GetObjectItem (json, "expires_in");
+  if (!j_obj || !cjson_is_number (j_obj) || j_obj->valueint < 60)
+    {
+      /* We require at least 60 seconds expiration time.  */
+      log_error ("paypal: error getting access token: bad 'expires_in'\n");
+      err = gpg_error (GPG_ERR_INV_RESPONSE);
+      goto leave;
+    }
+  expires_on = request_time + j_obj->valueint;
+  /* Adjust a bit to give some leeway.  */
+  if (j_obj->valueint > 1800)
+    expires_on -= 900;
+  else if (j_obj->valueint > 600)
+    expires_on -= 300;
+
+  goto retry;
+
  leave:
+  {
+    int res = npth_mutex_unlock (&my_lock);
+    if (res)
+      log_fatal ("paypal: failed to release access token lock: %s\n",
+                 gpg_strerror (gpg_error_from_errno (res)));
+  }
   keyvalue_release (hlpdict);
   cJSON_Delete (json);
   return err;
@@ -765,8 +845,8 @@ paypal_checkout_execute (keyvalue_t *dict)
   if (err)
     goto leave;
 
-  /* If Paypal returned an Email store that; if not delete the email
-     field.  */
+  /* If Paypal returned an Email addree store that; if not delete the
+   * email field.  */
   s = find_email (json);
   err = keyvalue_put (dict, "Email", s);
   if (err)
