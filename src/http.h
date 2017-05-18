@@ -67,7 +67,8 @@ typedef enum
     HTTP_REQ_GET  = 1,
     HTTP_REQ_HEAD = 2,
     HTTP_REQ_POST = 3,
-    HTTP_REQ_OPAQUE = 4  /* Internal use.  */
+    HTTP_REQ_PATCH = 4,
+    HTTP_REQ_OPAQUE = 5  /* Internal use.  */
   }
 http_req_t;
 

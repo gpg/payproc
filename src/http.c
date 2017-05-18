@@ -694,7 +694,9 @@ http_open (http_t *r_hd, http_req_t reqtype, const char *url,
 
   *r_hd = NULL;
 
-  if (!(reqtype == HTTP_REQ_GET || reqtype == HTTP_REQ_POST))
+  if (!(reqtype == HTTP_REQ_GET
+        || reqtype == HTTP_REQ_POST
+        || reqtype == HTTP_REQ_PATCH))
     return gpg_err_make (default_errsource, GPG_ERR_INV_ARG);
 
   /* Create the handle. */
@@ -1614,7 +1616,8 @@ send_request (http_t hd, const char *httphost, const char *auth,
         ("%s %s://%s:%hu%s%s HTTP/1.1\r\n%s%s",
          hd->req_type == HTTP_REQ_GET ? "GET" :
          hd->req_type == HTTP_REQ_HEAD ? "HEAD" :
-         hd->req_type == HTTP_REQ_POST ? "POST" : "OOPS",
+         hd->req_type == HTTP_REQ_POST ? "POST" :
+         hd->req_type == HTTP_REQ_PATCH ? "PATCH" : "OOPS",
          hd->uri->use_tls? "https" : "http",
          httphost? httphost : server,
          port, *p == '/' ? "" : "/", p,
@@ -1634,7 +1637,8 @@ send_request (http_t hd, const char *httphost, const char *auth,
         ("%s %s%s HTTP/1.1\r\nHost: %s%s\r\n%s",
          hd->req_type == HTTP_REQ_GET ? "GET" :
          hd->req_type == HTTP_REQ_HEAD ? "HEAD" :
-         hd->req_type == HTTP_REQ_POST ? "POST" : "OOPS",
+         hd->req_type == HTTP_REQ_POST ? "POST" :
+         hd->req_type == HTTP_REQ_PATCH ? "PATCH" : "OOPS",
          *p == '/' ? "" : "/", p,
          httphost? httphost : server,
          portstr,
