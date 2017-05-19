@@ -667,6 +667,8 @@ cmd_chargecard (conn_t conn, char *args)
  *
  *   Amount:     The amount to charge with optional decimal fraction.
  *   Currency:   A 3 letter currency code (EUR, USD, GBP, JPY)
+ *   Recur:      An optional recurrence interval: 0 = not recurring,
+ *               1 = yearly, 4 = quarterly, 12 = monthly.
  *   Desc:       Optional description of the charge.
  *   Meta[NAME]: Meta data further described by NAME.  This is used
  *               to convey application specific data to the log file.
@@ -718,6 +720,20 @@ cmd_ppcheckout (conn_t conn, char *args)
 
   if ((options = has_leading_keyword (args, "prepare")))
     {
+      int recur;
+
+      /* Get Recurrence value or replace by default.  */
+      s = keyvalue_get_string (dict, "Recur");
+      if (!valid_recur_p (s, &recur))
+        {
+          set_error (MISSING_VALUE, "Invalid value for 'Recur'");
+          goto leave;
+        }
+      err = keyvalue_putf (&conn->dataitems, "Recur", "%d", recur);
+      dict = conn->dataitems;
+      if (err)
+        goto leave;
+
       /* Get currency and amount.  */
       s = keyvalue_get_string (dict, "Currency");
       if (!valid_currency_p (s, &decdigs))
@@ -746,11 +762,46 @@ cmd_ppcheckout (conn_t conn, char *args)
           dict = conn->dataitems;
         }
 
-      /* Let's ask Paypal to process it.  */
-      err = paypal_checkout_prepare (&conn->dataitems);
-      if (err)
-        goto leave;
-      dict = conn->dataitems;
+      if (recur)
+        {
+          /* Let's ask Paypal to create a subscription.  */
+          s = keyvalue_get_string (dict, "Email");
+          if (!is_valid_mailbox (s))
+            {
+              set_error (MISSING_VALUE,
+                         "Recurring payment but no valid 'Email' given");
+              goto leave;
+            }
+
+          /* Find or create a plan.  */
+          err = paypal_find_create_plan (&conn->dataitems);
+          dict = conn->dataitems;
+          if (err)
+            {
+              conn->errdesc = "error creating a Plan";
+              goto leave;
+            }
+
+          /* Create a Subscription using the just plan from above and
+           * the Approval supplied to this command.  */
+          /* err = paypal_create_subscription (&conn->dataitems); */
+          /* dict = conn->dataitems; */
+          /* if (err) */
+          /*   { */
+          /*     conn->errdesc = "error creating a Subscription"; */
+          /*     goto leave; */
+          /*   } */
+
+        }
+      else
+        {
+          /* Let's ask Paypal to process it.  */
+          err = paypal_checkout_prepare (&conn->dataitems);
+          if (err)
+            goto leave;
+          dict = conn->dataitems;
+        }
+
     }
   else if ((options = has_leading_keyword (args, "execute")))
     {
@@ -760,6 +811,7 @@ cmd_ppcheckout (conn_t conn, char *args)
       if (err)
         goto leave;
       dict = conn->dataitems;
+      /* FIXME: We need to insert the recur parameter */
       jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_PAYPAL, 0);
       dict = conn->dataitems;
     }

@@ -39,16 +39,25 @@
 #define PAYPAL_TEST_HOST "https://api.sandbox.paypal.com"
 #define PAYPAL_LIVE_HOST "https://api.paypal.com"
 
-/* Perform a call to paypal.  KEYSTRING is the colon delimited
-   concatenation of client_id and secret key, METHOD is the method
-   without the version (e.g. "tokens") and DATA the individual part to
-   be appended to the URL (e.g. a token-id).  If FORMDATA is not NULL,
-   a POST operaion is used with that data instead of the default GET
-   operation.  On success the function returns 0 and a status code at
-   R_STATUS.  The data send with certain status code is stored in
-   parsed format at R_JSON - this might be NULL.  */
+
+/* This flag is set for a 401 and used by get_access_token to flush
+ * the cache.  This should never be needed so our strategy is not to
+ * write restart code for a 401 but mark that so that for the next
+ * access a new access token is retrieved.  */
+static int status_unauthorized_seen;
+
+
+/* Perform a call to paypal.  REQ_METHOD is the HTTP request method to
+ * use, AUTHSTRING is the colon delimited concatenation of client_id
+ * and secret key, METHOD is the method without the version
+ * (e.g. "tokens") and DATA the individual part to be appended to the
+ * URL (e.g. a token-id).  If FORMDATA is not NULL, a POST operaion is
+ * used with that data instead of the default GET operation.  On
+ * success the function returns 0 and a status code at R_STATUS.  The
+ * data send with certain status code is stored in parsed format at
+ * R_JSON - this might be NULL.  */
 static gpg_error_t
-call_paypal (int bearer, const char *authstring,
+call_paypal (http_req_t req_method, int bearer, const char *authstring,
              const char *method, const char *data,
              keyvalue_t kvformdata, const char *formdata,
              int *r_status, cjson_t *r_json)
@@ -75,15 +84,20 @@ call_paypal (int bearer, const char *authstring,
   if (opt.debug_paypal)
     {
       keyvalue_t kv;
-      log_debug ("paypal-req: %s %s\n", formdata? "POST" : "GET", url);
+      log_debug ("paypal-req: %s %s\n",
+                 req_method == HTTP_REQ_GET? "GET":
+                 req_method == HTTP_REQ_HEAD? "HEAD":
+                 req_method == HTTP_REQ_POST? "POST":
+                 req_method == HTTP_REQ_PATCH? "PATCH": "[method?]",
+                 url);
       for (kv = kvformdata; kv; kv = kv->next)
         log_printkeyval ("  ", kv->name, kv->value);
       if (formdata)
-        log_printval ("        data: ", formdata);
+        log_printval ("          data: ", formdata);
     }
 
   err = http_open (&http,
-                   kvformdata || formdata? HTTP_REQ_POST : HTTP_REQ_GET,
+                   req_method,
                    url,
                    NULL,
                    authstring,
@@ -142,6 +156,9 @@ call_paypal (int bearer, const char *authstring,
 
   status = http_get_status_code (http);
   *r_status = status;
+  if (status == 401)
+    status_unauthorized_seen = 1;
+
   if ((status / 100) == 2 || (status / 100) == 4)
     {
       int c;
@@ -223,7 +240,10 @@ extract_error_from_json (keyvalue_t *dict, cjson_t json)
   log_info ("paypal: error: type='%s' mesg='%.100s'\n",
             type, mesg);
 
-  err = keyvalue_put (dict, "failure", type);
+  if (dict)
+    err = keyvalue_put (dict, "failure", type);
+  else
+    err = 0;
 
   return err;
 }
@@ -455,6 +475,14 @@ get_access_token (char **r_access_token)
                  gpg_strerror (gpg_error_from_errno (res)));
   }
 
+  /* Hack to speed up debugging */
+  /* if (!access_token) */
+  /*   { */
+  /*     access_token = xstrdup ("A21AAHr9LXxrE8MBBNKVdHPGrG_6PgHYY6ysPgUYGtVuttKco8uV49aPhFVR3WQ-lJdY05QENMCYKFG68cgW6wvoWVep-TLWA"); */
+  /*     expires_on = time (NULL) + 3600; */
+  /*   } */
+
+
  retry:
   keyvalue_release (hlpdict); hlpdict = NULL;
   cJSON_Delete (json); json = NULL;
@@ -468,7 +496,11 @@ get_access_token (char **r_access_token)
     }
 
   /* Check whether we can use the last access token.  */
-  if (now + 30 < expires_on && access_token)
+  if (!access_token)
+    log_info ("paypal: cached access token: %s\n", "not yet cached");
+  else if (status_unauthorized_seen)
+    log_info ("paypal: cached access token: %s\n", "401 recently seen");
+  else if (now + 30 < expires_on)
     {
       *r_access_token = xtrystrdup (access_token);
       if (!*r_access_token)
@@ -477,9 +509,10 @@ get_access_token (char **r_access_token)
         err = 0; /* Success.  */
       goto leave;
     }
+  else
+    log_info ("paypal: cached access token: %s\n", "expire time too close");
 
-  log_info ("paypal: cached access token: %s\n",
-            access_token? "expire time too close": "not yet cached");
+  status_unauthorized_seen = 0;
 
   if (!max_retries--)
     {
@@ -501,7 +534,7 @@ get_access_token (char **r_access_token)
       severe_error ();
     }
 
-  err = call_paypal (0, opt.paypal_secret_key,
+  err = call_paypal (HTTP_REQ_POST, 0, opt.paypal_secret_key,
                      "oauth2/token", NULL,
                      hlpdict, NULL,
                      &status, &json);
@@ -563,6 +596,320 @@ get_access_token (char **r_access_token)
   }
   keyvalue_release (hlpdict);
   cJSON_Delete (json);
+  return err;
+}
+
+
+/* Find the id for a given plan with NAME.  ACCESS_TOKEN is the
+ * access_token we will need.  On success 0 is returned and the ID of
+ * the plan is stored as a malloced string at R_PLAN_ID.  If no
+ * matching plan was found, 0 is returned and NULL stored at
+ * R_PLAN_ID.  On error an error code is returned and also NULL stored
+ * at R_PLAN_ID.
+ *
+ * FIXME: Add some caching.
+ */
+static gpg_error_t
+find_plan (const char *name, const char *access_token, char **r_plan_id)
+{
+  gpg_error_t err;
+  int status;
+  const int page_size = 20; /* Maximum allowed as of 2017-05-18.  */
+  int page = 0;
+  char *method = NULL;
+  cjson_t json = NULL;
+  cjson_t j_obj, j_item, j_str;
+  int idx;
+  const char *my_id, *my_name, *my_upd;
+  char last_update[24+1] = {0}; /* Format: "2017-05-18T15:47:05.110Z" */
+  char *last_plan_id = NULL;
+
+  *r_plan_id = NULL;
+
+  do
+    {
+      es_free (method); method = NULL;
+      method = es_bsprintf ("payments/billing-plans"
+                            "?status=ACTIVE&page_size=%d&page=%d",
+                            page_size, page);
+      if (!method)
+        {
+          err = gpg_error_from_syserror ();
+          goto leave;
+        }
+
+      cJSON_Delete (json); json = NULL;
+      err = call_paypal (HTTP_REQ_GET, 1, access_token, method,
+                         NULL, NULL, NULL,
+                         &status, &json);
+      if (err)
+        goto leave;
+      if (status == 204) /* No Content */
+        goto leave; /* Ready: No more plans.  */
+      if (status != 200)
+        {
+          log_error ("paypal:%s: error: status=%u\n", __func__, status);
+          err = extract_error_from_json (NULL, json);
+          if (!err)
+            err = gpg_error (GPG_ERR_GENERAL);
+          goto leave;
+        }
+
+      j_obj = cJSON_GetObjectItem (json, "plans");
+      if (!j_obj || !cjson_is_array (j_obj))
+        {
+          log_error ("paypal:%s: error: unexpected object returned\n",
+                     __func__);
+          err = gpg_error (GPG_ERR_INV_OBJ);
+          goto leave;
+        }
+
+      for (idx = 0; (j_item = cJSON_GetArrayItem (j_obj, idx)); idx++)
+        {
+          my_id = my_name = "[?]";
+          my_upd = "";
+          j_str = cJSON_GetObjectItem (j_item, "id");
+          if (j_str && cjson_is_string (j_str))
+            {
+              my_id = j_str->valuestring;
+              j_str = cJSON_GetObjectItem (j_item, "name");
+              if (j_str && cjson_is_string (j_str))
+                my_name = j_str->valuestring;
+              j_str = cJSON_GetObjectItem (j_item, "update_time");
+              if (j_str && cjson_is_string (j_str))
+                my_upd = j_str->valuestring;
+            }
+          if (opt.debug_paypal > 1)
+            log_debug ("plan: id=%s name=%s upd=%s\n", my_id, my_name, my_upd);
+          if (!strcmp (my_name, name))
+            {
+              if (strcmp (my_upd, last_update) > 0)
+                {
+                  strncpy (last_update, my_upd, sizeof last_update - 1);
+                  last_update[sizeof last_update - 1] = 0;
+                  if (!last_plan_id)
+                    last_plan_id = xtrystrdup (my_id);
+                  else if (strlen (last_plan_id) >= strlen (my_id))
+                    strcpy (last_plan_id, my_id);
+                  else
+                    {
+                      xfree (last_plan_id); last_plan_id = NULL;
+                      last_plan_id = xtrystrdup (my_id);
+                    }
+                  if (!last_plan_id)
+                    {
+                      err = gpg_error_from_syserror ();
+                      goto leave;
+                    }
+                }
+            }
+        }
+      page++;
+    }
+  while (idx == page_size);
+
+
+ leave:
+  /* On success return the plan id.  */
+  if (!err && last_plan_id)
+    {
+      *r_plan_id = last_plan_id;
+      last_plan_id = NULL;
+    }
+  cJSON_Delete (json);
+  es_free (method);
+  xfree (last_plan_id);
+  return err;
+}
+
+
+/* Using the values from DICT a corresponding plan is retrieved or
+ * created.  The dictionary is then updated.  Required items:
+ *
+ *    Amount: The amount.
+ *  Currency: A 3 letter currency code.
+ *     Recur: The recurrence interval:
+ *            1 = yearly, 4 = quarterly, 12 = monthly.
+ *
+ * On success the following items are inserted/updated:
+ *
+ *  _plan-id: The PayPal plan id.
+ */
+gpg_error_t
+paypal_find_create_plan (keyvalue_t *dict)
+{
+  gpg_error_t err;
+  int status;
+  char *access_token = NULL;
+  char *request = NULL;
+  cjson_t json = NULL;
+  const char *s;
+  cjson_t j_obj;
+  char *plan_name = NULL;
+  char *plan_id = NULL;
+  const char *currency;
+  const char *amount;
+  int recur;
+  const char *recur_text;
+
+  s = keyvalue_get_string (*dict, "Currency");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  currency = s;
+
+  recur = keyvalue_get_int (*dict, "Recur");
+  if (recur == 1)
+    recur_text = "yearly";
+  else if (recur == 4)
+    recur_text = "quarterly";
+  else if (recur == 12)
+    recur_text = "monthly";
+  else
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+
+  s = keyvalue_get_string (*dict, "Amount");
+  if (!*s)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  amount = s;
+
+  /* Build the name of the plan.  */
+  plan_name = es_bsprintf ("gnupg-%d-%s-%s", recur, amount, currency);
+  if (!plan_name)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  ascii_strlwr (plan_name); /* This is for the currency part.  */
+
+
+  err = get_access_token (&access_token);
+  if (err)
+    goto leave;
+
+  err = find_plan (plan_name, access_token, &plan_id);
+  if (err)
+    goto leave;
+
+  if (plan_id)
+    {
+      log_debug ("found plan '%s' with id '%s'\n", plan_name, plan_id);
+      goto leave;
+    }
+
+  /* No such plan - create a new one.  */
+  /* I wonder why they need return URL - they are not used.  Let's
+   * keep those from the example; they should be safe.  */
+  request = es_bsprintf
+    ("{"
+     "  \"name\": \"%s\","
+     "  \"description\": \"%s %s %s for gnupg\","
+     "  \"type\": \"INFINITE\","
+     "  \"payment_definitions\": ["
+     "    {"
+     "      \"name\": \"%s payment of %s %s\","
+     "      \"type\": \"REGULAR\","
+     "      \"frequency\": \"%s\","
+     "      \"frequency_interval\": \"%d\","
+     "      \"cycles\": \"0\","
+     "      \"amount\": {"
+     "          \"value\": \"%s\","
+     "          \"currency\": \"%s\""
+     "      }"
+     "    }"
+     "  ],"
+     "  \"merchant_preferences\": {"
+     "      \"auto_bill_amount\": \"NO\","
+     "      \"initial_fail_amount_action\": \"CONTINUE\","
+     "      \"max_fail_attempts\": \"0\","
+     "      \"return_url\": \"https://www.paypal.com\","
+     "      \"cancel_url\": \"http://www.paypal.com/cancel\""
+     "  }"
+     "}",
+     plan_name, amount, currency, recur_text,
+     recur_text, amount, currency,
+     recur == 1? "YEAR" : "MONTH",
+     recur == 4? 3 : 1,
+     amount, currency
+     );
+  if (!request)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+
+  err = call_paypal (HTTP_REQ_POST, 1, access_token,
+                     "payments/billing-plans/", NULL,
+                     NULL, request,
+                     &status, &json);
+  if (err)
+    goto leave;
+  if (status != 201)
+    {
+      log_error ("create_plan: error: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  /* Get the plan id.  */
+  j_obj = cJSON_GetObjectItem (json, "id");
+  if (!j_obj || !cjson_is_string (j_obj) || !*j_obj->valuestring)
+    {
+      log_error ("paypal: plan id missing in result\n");
+      err = gpg_error (GPG_ERR_INV_OBJ);
+      goto leave;
+    }
+  plan_id = xtrystrdup (j_obj->valuestring);
+  if (!plan_id)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  log_info ("paypal: new plan '%s' with id '%s' created\n", plan_name, plan_id);
+
+  /* Need to change the state of the plan from CREATED to ACTIVE.  */
+  cJSON_Delete (json); json = NULL;
+  err = call_paypal (HTTP_REQ_PATCH, 1, access_token,
+                     "payments/billing-plans", plan_id,
+                     NULL, ("[{"
+                            "    \"op\": \"replace\","
+                            "    \"path\": \"/\","
+                            "    \"value\": {"
+                            "        \"state\": \"ACTIVE\""
+                            "    }"
+                            "}]"),
+                     &status, &json);
+  if (err)
+    goto leave;
+  if (status != 200)
+    {
+      log_error ("create_plan: error setting to active: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+  log_info ("paypal: new plan '%s' with id '%s' activated\n",
+            plan_name, plan_id);
+
+
+ leave:
+  if (!err && plan_id)
+    err = keyvalue_put (dict, "_plan-id", plan_id);
+  es_free (plan_name);
+  xfree (plan_id);
+  es_free (request);
+  cJSON_Delete (json);
+  xfree (access_token);
   return err;
 }
 
@@ -670,7 +1017,7 @@ paypal_checkout_prepare (keyvalue_t *dict)
       goto leave;
     }
 
-  err = call_paypal (1, access_token,
+  err = call_paypal (HTTP_REQ_POST, 1, access_token,
                      "payments/payment", NULL,
                      NULL, request,
                      &status, &json);
@@ -818,7 +1165,7 @@ paypal_checkout_execute (keyvalue_t *dict)
       goto leave;
     }
 
-  err = call_paypal (1, access_token,
+  err = call_paypal (HTTP_REQ_POST, 1, access_token,
                      method, NULL,
                      NULL, request,
                      &status, &json);
