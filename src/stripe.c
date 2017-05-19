@@ -127,7 +127,12 @@ call_stripe (const char *keystring, const char *method, const char *data,
         err = gpg_error_from_syserror ();
       else
         {
-          cjson_t root = cJSON_Parse (jsonstr, NULL);
+          cjson_t root;
+
+          if (!*jsonstr)
+            root = cJSON_Parse ("null", NULL);
+          else
+            root = cJSON_Parse (jsonstr, NULL);
           if (!root)
             err = gpg_error_from_syserror ();
           else
