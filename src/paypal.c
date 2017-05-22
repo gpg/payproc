@@ -1443,7 +1443,7 @@ paypal_checkout_execute (keyvalue_t *dict)
 
   /* Get the required Paypal parameters.  We first try the HATEOAS
    * approach and then fallback to the old id thing.  */
-  hateoas_execute = keyvalue_get_string (state, "_paypal:hateoas:execute");
+  hateoas_execute = keyvalue_get (state, "_paypal:hateoas:execute");
   if (!hateoas_execute)
     {
       paypal_id = keyvalue_get_string (state, "_paypal:id");
