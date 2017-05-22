@@ -27,6 +27,8 @@
  *   verified INTEGER NOT NULL,        -- True when the mail
  *                                        has has been verified
  *   stripe_cus TEXT,                  -- The encrypted customer id.
+ *   paypal_payer_id TEXT              -- The encrypted paypal apyer id from
+ *                                        a subscription.
  *   meta TEXT       -- Copy of the meta data as put into the journal.
  *                   -- This is also encrypted using the database key.
  * )
@@ -193,6 +195,7 @@ open_account_db (void)
                             "created    TEXT NOT NULL,\n"
                             "updated    TEXT NOT NULL,\n"
                             "stripe_cus TEXT,\n"
+                            "paypal_payer_id TEXT,\n"
                             "meta       TEXT"
                             ")",
                             -1, &stmt, NULL);
@@ -212,6 +215,26 @@ open_account_db (void)
       close_account_db (1);
       return gpg_error (GPG_ERR_GENERAL);
     }
+
+  /* During development of 0.4.0 we added a new column.  Always try to
+   * create it.  */
+  res = sqlite3_prepare_v2 (account_db,
+                            "ALTER TABLE account ADD COLUMN \n"
+                            "paypal_payer_id TEXT",
+                            -1, &stmt, NULL);
+  if (!res)
+    {
+      res = sqlite3_step (stmt);
+      sqlite3_finalize (stmt);
+      if (res != SQLITE_DONE)
+        {
+          log_error ("error adding column to account table: %s\n",
+                     sqlite3_errstr (res));
+          close_account_db (1);
+          return gpg_error (GPG_ERR_GENERAL);
+        }
+    }
+
 
   /* Prepare an insert statement.  */
   res = sqlite3_prepare_v2
@@ -233,7 +256,8 @@ open_account_db (void)
                             "UPDATE account SET"
                             " updated = ?2,"
                             " stripe_cus = ?3,"
-                            " email = ?4"
+                            " email = ?4,"
+                            " paypal_payer_id = ?5"
                             " WHERE account_id=?1",
                             -1, &stmt, NULL);
   if (res)
@@ -313,9 +337,15 @@ new_account_record (char **r_account_id)
 }
 
 
-/* Update the row specified by 'account-id'.  Currently the value
- * '_stripe_cus' is put encrypted into the column stripe_cus and if
- * available the value 'Email' is but into the column email.  */
+/* Update the row specified by 'account-id'.  The following values are
+ * updated if they are in DICT.
+ *
+ *  | DICT name        | account name    | encrypted |
+ *  |------------------+-----------------+-----------|
+ *  | _stripe_cus      | stripe_cus      | yes       |
+ *  | _paypal_payer_id | paypal_payer_id | yes       |
+ *  | Email            | email           | no        |
+ */
 static gpg_error_t
 update_account_record (keyvalue_t dict)
 {
@@ -326,6 +356,8 @@ update_account_record (keyvalue_t dict)
   const char *stripe_cus;
   char *enc_stripe_cus = NULL;
   const char *email;
+  const char *paypal_payer_id;
+  char *enc_paypal_payer_id = NULL;
 
   account_id = keyvalue_get_string (dict, "account-id");
   if (!*account_id)
@@ -338,20 +370,29 @@ update_account_record (keyvalue_t dict)
   email = keyvalue_get (dict, "Email");
 
   stripe_cus = keyvalue_get_string (dict, "_stripe_cus");
-  if (!*stripe_cus)
+  if (*stripe_cus)
     {
-      log_error ("%s: value for '_stripe_cus' missing\n", __func__);
-      err = gpg_error (GPG_ERR_MISSING_VALUE);
-      goto leave;
+      err = encrypt_string (&enc_stripe_cus, stripe_cus,
+                            (ENCRYPT_TO_DATABASE | ENCRYPT_TO_BACKOFFICE));
+      if (err)
+        {
+          log_error ("encrypting the Stripe customer_id failed: %s <%s>\n",
+                     gpg_strerror (err), gpg_strsource (err));
+          goto leave;
+        }
     }
 
-  err = encrypt_string (&enc_stripe_cus, stripe_cus,
-                        (ENCRYPT_TO_DATABASE | ENCRYPT_TO_BACKOFFICE));
-  if (err)
+  paypal_payer_id = keyvalue_get_string (dict, "_paypal_payer_id");
+  if (*paypal_payer_id)
     {
-      log_error ("encrypting the Stripe customer_id failed: %s <%s>\n",
-                 gpg_strerror (err), gpg_strsource (err));
-      goto leave;
+      err = encrypt_string (&enc_paypal_payer_id, paypal_payer_id,
+                            (ENCRYPT_TO_DATABASE | ENCRYPT_TO_BACKOFFICE));
+      if (err)
+        {
+          log_error ("encrypting the Paypal paper_id failed: %s <%s>\n",
+                     gpg_strerror (err), gpg_strsource (err));
+          goto leave;
+        }
     }
 
   sqlite3_reset (account_update_stmt);
@@ -370,6 +411,10 @@ update_account_record (keyvalue_t dict)
   if (!res)
     res = sqlite3_bind_text (account_update_stmt,
                              4, email, -1,
+                             SQLITE_TRANSIENT);
+  if (!res)
+    res = sqlite3_bind_text (account_update_stmt,
+                             5, enc_paypal_payer_id, -1,
                              SQLITE_TRANSIENT);
   if (res)
     {
@@ -396,6 +441,7 @@ update_account_record (keyvalue_t dict)
 
  leave:
   xfree (enc_stripe_cus);
+  xfree (enc_paypal_payer_id);
   return err;
 }
 

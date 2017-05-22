@@ -959,6 +959,42 @@ get_current_time (char *timestamp)
 }
 
 
+/* Get the current time in full iso format and return it as a malloced
+ * string.  OFFSET is added to the curretn time.  Returns NULL on
+ * error. */
+char *
+get_full_isotime (int offset)
+{
+  time_t atime = time (NULL);
+  struct tm *tp;
+  char buffer[20 + 2];
+
+  if (atime == (time_t)(-1))
+    {
+      log_error ("time() failed: %s\n",
+                 gpg_strerror (gpg_error_from_syserror()));
+      severe_error ();
+    }
+  atime += offset;
+
+#ifdef HAVE_GMTIME_R
+  {
+    struct tm tmbuf;
+
+    tp = gmtime_r (&atime, &tmbuf);
+  }
+#else
+  tp = gmtime (&atime);
+#endif
+
+  snprintf (buffer, sizeof buffer,
+            "%04d-%02d-%02dT%02d:%02d:%02dZ",
+            1900 + tp->tm_year, tp->tm_mon+1, tp->tm_mday,
+            tp->tm_hour, tp->tm_min, tp->tm_sec);
+  return xtrystrdup (buffer);
+}
+
+
 
 /* Check the amount given in STRING and convert it to the smallest
    currency unit.  DECDIGITS gives the number of allowed post decimal

@@ -165,6 +165,7 @@ int zb32_index (int c);
 char *zb32_encode (const void *data, unsigned int databits);
 
 char *get_current_time (char *timestamp);
+char *get_full_isotime (int offset);
 
 unsigned int convert_amount (const char *string, int decdigits);
 char *reconvert_amount (int cents, int decdigits);

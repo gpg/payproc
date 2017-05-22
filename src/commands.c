@@ -693,16 +693,17 @@ cmd_chargecard (conn_t conn, char *args)
  *                 prepare command.  This should be retrieved from the
  *                 Return-Url's "aliasid" parameter which has been
  *                 appended to the Return-Url by the prepare sub-command.
- *   Paypal-Payer: Returned by Paypal via the
- *                 Return-Url's "PayerID" parameter.
+ *   Paypal-Payer: Returned by Paypal for non-recurring subscriptions via
+ *                 the Return-Url's "PayerID" parameter.
  *
  *   On success these items are returned:
  *
- *   Charge-Id:  The ID describing this charge
+ *   Charge-Id:  The ID describing this charge (not for subscriptions)
  *   Live:       Set to 'f' in test mode or 't' in live mode.
  *   Currency:   The currency of the charge.
  *   Amount:     The charged amount with optional decimal fraction.
  *   Email:      The mail address as told by Paypal.
+ *   account-id: Our account id for recurring payments.
  *   _timestamp: The timestamp as written to the journal
  *
  */
@@ -784,14 +785,13 @@ cmd_ppcheckout (conn_t conn, char *args)
 
           /* Create a Subscription using the just plan from above and
            * the Approval supplied to this command.  */
-          /* err = paypal_create_subscription (&conn->dataitems); */
-          /* dict = conn->dataitems; */
-          /* if (err) */
-          /*   { */
-          /*     conn->errdesc = "error creating a Subscription"; */
-          /*     goto leave; */
-          /*   } */
-
+          err = paypal_create_subscription (&conn->dataitems);
+          dict = conn->dataitems;
+          if (err)
+            {
+              conn->errdesc = "error creating a Subscription";
+              goto leave;
+            }
         }
       else
         {
@@ -811,8 +811,8 @@ cmd_ppcheckout (conn_t conn, char *args)
       if (err)
         goto leave;
       dict = conn->dataitems;
-      /* FIXME: We need to insert the recur parameter */
-      jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_PAYPAL, 0);
+      jrnl_store_charge_record (&conn->dataitems, PAYMENT_SERVICE_PAYPAL,
+                                keyvalue_get_int (conn->dataitems, "Recur"));
       dict = conn->dataitems;
     }
   else
@@ -846,6 +846,10 @@ cmd_ppcheckout (conn_t conn, char *args)
                           || !strcmp (kv->name, "Currency")
                           || !strcmp (kv->name, "Amount"))))
       write_data_line (kv, conn->stream);
+
+  if (execmode)
+    write_data_line (keyvalue_find (conn->dataitems, "account-id"),
+                     conn->stream);
 
   if (!err)
     {

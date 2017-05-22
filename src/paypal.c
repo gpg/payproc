@@ -1,5 +1,5 @@
 /* paypal.c - Access the PayPal
- * Copyright (C) 2014 g10 Code GmbH
+ * Copyright (C) 2014, 2017 g10 Code GmbH
  *
  * This file is part of Payproc.
  *
@@ -33,6 +33,7 @@
 #include "payprocd.h"
 #include "form.h"
 #include "session.h"
+#include "account.h"
 #include "paypal.h"
 
 
@@ -63,6 +64,7 @@ call_paypal (http_req_t req_method, int bearer, const char *authstring,
              int *r_status, cjson_t *r_json)
 {
   gpg_error_t err;
+  const char *urlprefix;
   char *url = NULL;
   http_session_t session = NULL;
   http_t http = NULL;
@@ -72,8 +74,20 @@ call_paypal (http_req_t req_method, int bearer, const char *authstring,
   *r_status = 0;
   *r_json = NULL;
 
-  url = strconcat (opt.livemode? PAYPAL_LIVE_HOST : PAYPAL_TEST_HOST,
-                   "/v1/", method, data? "/": NULL, data, NULL);
+  if (opt.livemode)
+    urlprefix = PAYPAL_LIVE_HOST "/v1/";
+  else
+    urlprefix = PAYPAL_TEST_HOST "/v1/";
+
+  /* If METHOD is a complete URL with the same prefix as ours, skip
+   * over it.  We do this check to make sure that we have the same
+   * idea of which host to contact.  In theory the host part should be
+   * case insensitive but here we assume that an HATEOAS URL uses a
+   * lowercase hostname.  */
+  if (!data && !strncmp (urlprefix, method, strlen (urlprefix)))
+    method += strlen (urlprefix);
+
+  url = strconcat (urlprefix, method, data? "/": NULL, data, NULL);
   if (!url)
     return gpg_error_from_syserror ();
 
@@ -101,7 +115,9 @@ call_paypal (http_req_t req_method, int bearer, const char *authstring,
                    url,
                    NULL,
                    authstring,
-                   (bearer? HTTP_FLAG_AUTH_BEARER : 0),
+                   ((bearer? HTTP_FLAG_AUTH_BEARER : 0)
+                    | (opt.debug_paypal > 1? HTTP_FLAG_LOG_RESP : 0))
+                   ,
                    NULL,
                    session,
                    NULL,
@@ -159,7 +175,7 @@ call_paypal (http_req_t req_method, int bearer, const char *authstring,
   if (status == 401)
     status_unauthorized_seen = 1;
 
-  if ((status / 100) == 2 || (status / 100) == 4)
+  if ((status / 100) == 2 || (status / 100) == 4 || (status / 100) == 5)
     {
       int c;
       membuf_t mb;
@@ -181,7 +197,11 @@ call_paypal (http_req_t req_method, int bearer, const char *authstring,
           else
             root = cJSON_Parse (jsonstr, NULL);
           if (!root)
-            err = gpg_error_from_syserror ();
+            {
+              err = gpg_error_from_syserror ();
+              if (opt.debug_paypal)
+                log_printval ("DATA: ", jsonstr);
+            }
           else
             *r_json = root;
           xfree (jsonstr);
@@ -311,6 +331,33 @@ find_approval_url (cjson_t json)
   return NULL;
 }
 
+
+/* Find the execute URL in JSON.  Returns NULL on error. */
+static const char *
+find_execute_url (cjson_t json)
+{
+  cjson_t j_obj, j_item, j_str;
+  int i;
+
+  j_obj = cJSON_GetObjectItem (json, "links");
+  if (!j_obj || !cjson_is_array (j_obj))
+    return NULL;
+  for (i=0; (j_item = cJSON_GetArrayItem (j_obj, i)); i++)
+    {
+      j_str = cJSON_GetObjectItem (j_item, "rel");
+      if (j_str && cjson_is_string (j_str)
+          && !strcmp (j_str->valuestring, "execute"))
+        {
+          j_str = cJSON_GetObjectItem (j_item, "href");
+          if (j_str && cjson_is_string (j_str))
+            return j_str->valuestring;
+        }
+    }
+
+  return NULL;
+}
+
+
 /* Find the sale id in JSON.  Returns NULL on error. */
 static const char *
 find_sale_id (cjson_t json)
@@ -357,6 +404,25 @@ find_email (cjson_t json)
   if (!j_obj || !cjson_is_object (j_obj))
     return NULL;
   j_obj = cJSON_GetObjectItem (j_obj, "email");
+  if (!j_obj || !cjson_is_string (j_obj))
+    return NULL;
+  return j_obj->valuestring;
+}
+
+
+/* Find the payer_id in JSON.  Returns NULL on error. */
+static const char *
+find_payer_id (cjson_t json)
+{
+  cjson_t j_obj;
+
+  j_obj = cJSON_GetObjectItem (json, "payer");
+  if (!j_obj || !cjson_is_object (j_obj))
+    return NULL;
+  j_obj = cJSON_GetObjectItem (j_obj, "payer_info");
+  if (!j_obj || !cjson_is_object (j_obj))
+    return NULL;
+  j_obj = cJSON_GetObjectItem (j_obj, "payer_id");
   if (!j_obj || !cjson_is_string (j_obj))
     return NULL;
   return j_obj->valuestring;
@@ -733,7 +799,8 @@ find_plan (const char *name, const char *access_token, char **r_plan_id)
  *
  * On success the following items are inserted/updated:
  *
- *  _plan-id: The PayPal plan id.
+ *  _plan-name: The name of the plan.
+ *    _plan-id: The PayPal plan id.
  */
 gpg_error_t
 paypal_find_create_plan (keyvalue_t *dict)
@@ -789,7 +856,9 @@ paypal_find_create_plan (keyvalue_t *dict)
       goto leave;
     }
   ascii_strlwr (plan_name); /* This is for the currency part.  */
-
+  err = keyvalue_put (dict, "_plan-name", plan_name);
+  if (err)
+    goto leave;
 
   err = get_access_token (&access_token);
   if (err)
@@ -801,7 +870,7 @@ paypal_find_create_plan (keyvalue_t *dict)
 
   if (plan_id)
     {
-      log_debug ("found plan '%s' with id '%s'\n", plan_name, plan_id);
+      log_info ("found plan '%s' with id '%s'\n", plan_name, plan_id);
       goto leave;
     }
 
@@ -914,7 +983,249 @@ paypal_find_create_plan (keyvalue_t *dict)
 }
 
 
-/* The implementation of the PPCHECKOUT sub-command "prepare".  */
+/* The implementation of the PPCHECKOUT sub-command "prepare" for
+ * recurring donations.  The exepcted value in DICT are:
+ *
+ *   _plan-id: The plan ID for this sunscription.
+ * _plan-name: The name of the plan for this subscription.
+ *      Recur: The recurrence interval
+ *       Desc: An optional  description string.
+ * Session-Id: Id of the session to be used for storing state.
+ * Return-Url: URL to which Paypal shall redirect.
+ * Cancel-Url: URL to which Paypal shall redirect on cancel.
+ *
+ * On success the following items are inserted/updated:
+ *
+ * Redirect-Url: The caller must be redirected to this URL for further
+ *               processing.
+ */
+gpg_error_t
+paypal_create_subscription (keyvalue_t *dict)
+{
+  gpg_error_t err;
+  int status;
+  keyvalue_t hlpdict = NULL;
+  char *access_token = NULL;
+  char *account_id = NULL;
+  char *request = NULL;
+  cjson_t json = NULL;
+  const char *plan_id;
+  const char *plan_name;
+  const char *email;
+  char *return_url = NULL;
+  char *cancel_url = NULL;
+  char *desc = NULL;
+  const char *sessid;
+  const char *s;
+  char *p;
+  char *aliasid = NULL;
+  char *start_date = NULL;
+
+  plan_id = keyvalue_get_string (*dict, "_plan-id");
+  if (!*plan_id)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  plan_name = keyvalue_get_string (*dict, "_plan-name");
+  if (!*plan_name)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  email = keyvalue_get_string (*dict, "Email");
+  if (!*email)
+    {
+      log_error ("%s: missing 'Email'\n", __func__);
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = get_url (*dict, "Return-Url", &return_url);
+  if (err)
+    goto leave;
+  err = get_url (*dict, "Cancel-Url", &cancel_url);
+  if (err)
+    goto leave;
+  if (!keyvalue_get_int (*dict, "Recur"))
+    {
+      log_error ("%s: missing 'Recur'\n", __func__);
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+
+  /* The description is an optional input parameter and may not have
+     quotes and must be less than 127 characters.  However, we need to
+     provide one to Paypal. */
+  s = keyvalue_get_string (*dict, "Desc");
+  if (*s)
+    desc = xtrystrdup (s);
+  else
+    desc = es_bsprintf ("Subscription using plan %s", plan_name);
+  if (!desc)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+  for (p=desc; *p; p++)
+    if (*p == '\"')
+      *p = '\'';
+  if (strlen (desc) > 126)
+    {
+      desc[122] = ' ';
+      desc[123] = '.';
+      desc[124] = '.';
+      desc[125] = '.';
+      desc[126] = 0;
+    }
+
+  /* Create an alias for the session.  */
+  sessid = keyvalue_get_string (*dict, "Session-Id");
+  if (!*sessid)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+  err = session_create_alias (sessid, &aliasid);
+  if (err)
+    goto leave;
+
+  /* Ask for an access token.  */
+  err = get_access_token (&access_token);
+  if (err)
+    goto leave;
+
+  /* Create a new empty account for the customer.  */
+  err = account_new_record (&account_id);
+  if (err)
+    goto leave;
+
+  /* The start_date must be on the next day.  */
+  start_date = get_full_isotime (64400);
+  if (!start_date)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+
+  /* Prepare the payment.  */
+  request = es_bsprintf ("{"
+                         "  \"name\": \"Subscription %s (%s)\","
+                         "  \"description\": \"%s\","
+                         "  \"start_date\": \"%s\","
+                         "  \"plan\": {"
+                         "      \"id\": \"%s\""
+                         "  },"
+                         "  \"payer\": {"
+                         "      \"payment_method\": \"paypal\","
+                         "      \"payer_info\": {"
+                         "          \"email\": \"%s\""
+                         "      }"
+                         "  },"
+                         "  \"override_merchant_preferences\": {"
+                         "    \"cancel_url\": \"%s\","
+                         "    \"return_url\": \"%s%caliasid=%s\""
+                         "  }"
+                         "}",
+                         plan_name, account_id,
+                         desc,
+                         start_date,
+                         plan_id,
+                         email,
+                         cancel_url,
+                         return_url,
+                         strchr (return_url, '?')? '&' : '?', aliasid);
+  if (!request)
+    {
+      err = gpg_error_from_syserror ();
+      goto leave;
+    }
+
+  err = call_paypal (HTTP_REQ_POST, 1, access_token,
+                     "payments/billing-agreements", NULL,
+                     NULL, request,
+                     &status, &json);
+  if (err)
+    goto leave;
+  if (status != 200 && status != 201)
+    {
+      log_error ("paypal: error sending payment: status=%u\n", status);
+      err = extract_error_from_json (dict, json);
+      if (!err)
+        err = gpg_error (GPG_ERR_GENERAL);
+      goto leave;
+    }
+
+  /* Find the redirect URL and put it into the output.  */
+  s = find_approval_url (json);
+  if (!s || !*s)
+    {
+      log_error ("paypal: HATEOAS:approval_url missing in result\n");
+      err = gpg_error (GPG_ERR_INV_OBJ);
+      goto leave;
+    }
+  err = keyvalue_put (dict, "Redirect-Url", s);
+  if (err)
+    goto leave;
+
+  /* Save the state in the session.  */
+  s = find_execute_url (json);
+  if (!s || !*s)
+    {
+      log_error ("paypal: HATEOAS:execute missing in result\n");
+      err = gpg_error (GPG_ERR_INV_OBJ);
+      goto leave;
+    }
+  err = keyvalue_put (&hlpdict, "_paypal:hateoas:execute", s);
+  if (err)
+    goto leave;
+
+  err = keyvalue_put (&hlpdict, "_paypal:plan_id", plan_id);
+  if (err)
+    goto leave;
+  err = keyvalue_put (&hlpdict, "_paypal:plan_name", plan_name);
+  if (err)
+    goto leave;
+  err = keyvalue_put (&hlpdict, "_paypal:access_token", access_token);
+  if (err)
+    goto leave;
+  err = keyvalue_put (&hlpdict, "_paypal:account_id", account_id);
+  if (err)
+    goto leave;
+
+  err = backup_meta (&hlpdict, *dict);
+  if (!err)
+    err = backup_field (&hlpdict, *dict, "Amount");
+  if (!err)
+    err = backup_field (&hlpdict, *dict, "Currency");
+  if (!err)
+    err = backup_field (&hlpdict, *dict, "Desc");
+  if (!err)
+    err = backup_field (&hlpdict, *dict, "Recur");
+  if (err)
+    goto leave;
+
+  err = session_put (sessid, hlpdict);
+  if (err)
+    goto leave;
+
+
+ leave:
+  xfree (request);
+  xfree (start_date);
+  xfree (account_id);
+  xfree (access_token);
+  keyvalue_release (hlpdict);
+  cJSON_Delete (json);
+  xfree (return_url);
+  xfree (cancel_url);
+  xfree (aliasid);
+  xfree (desc);
+  return err;
+}
+
+
+/* The implementation of the PPCHECKOUT sub-command "prepare".  This
+ * is not used for recurring donations.  */
 gpg_error_t
 paypal_checkout_prepare (keyvalue_t *dict)
 {
@@ -976,6 +1287,11 @@ paypal_checkout_prepare (keyvalue_t *dict)
 
   /* Create an alias for the session.  */
   sessid = keyvalue_get_string (*dict, "Session-Id");
+  if (!*sessid)
+    {
+      err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
   err = session_create_alias (sessid, &aliasid);
   if (err)
     goto leave;
@@ -1097,8 +1413,10 @@ paypal_checkout_execute (keyvalue_t *dict)
 {
   gpg_error_t err;
   char *paypal_payer = NULL;
+  const char *hateoas_execute;
   const char *paypal_id;
   const char *access_token;
+  const char *account_id = NULL;
   char *sessid = NULL;
   keyvalue_t state = NULL;
   int status;
@@ -1106,10 +1424,7 @@ paypal_checkout_execute (keyvalue_t *dict)
   char *request = NULL;
   char *method = NULL;
   const char *s;
-
-  err = get_string (*dict, "Paypal-Payer", &paypal_payer);
-  if (err)
-    goto leave;
+  keyvalue_t accountdict = NULL;
 
   /* Get the state and destroy the alias so that this execute may only
      be called once.  */
@@ -1126,13 +1441,27 @@ paypal_checkout_execute (keyvalue_t *dict)
       goto leave;
   }
 
-  /* Get the required Paypal parameters.  */
-  paypal_id = keyvalue_get_string (state, "_paypal:id");
-  if (!*paypal_id)
+  /* Get the required Paypal parameters.  We first try the HATEOAS
+   * approach and then fallback to the old id thing.  */
+  hateoas_execute = keyvalue_get_string (state, "_paypal:hateoas:execute");
+  if (!hateoas_execute)
     {
-      err = gpg_error (GPG_ERR_MISSING_VALUE);
-      goto leave;
+      paypal_id = keyvalue_get_string (state, "_paypal:id");
+      if (!*paypal_id)
+        {
+          err = gpg_error (GPG_ERR_MISSING_VALUE);
+          goto leave;
+        }
+
+      account_id = NULL;
     }
+  else
+    {
+      paypal_id = NULL;
+      account_id = keyvalue_get_string (state, "_paypal:account_id");
+    }
+
+
   access_token = keyvalue_get_string (state, "_paypal:access_token");
   if (!*access_token)
     {
@@ -1148,27 +1477,44 @@ paypal_checkout_execute (keyvalue_t *dict)
     err = restore_field (dict, state, "_Currency");
   if (!err)
     err = restore_field (dict, state, "_Desc");
+  if (!err)
+    err = restore_field (dict, state, "_Recur");
   if (err)
     goto leave;
 
   /* Execute the payment.  */
-  request = es_bsprintf ("{ \"payer_id\": \"%s\" }", paypal_payer);
-  if (!request)
+  if (hateoas_execute)  /* The modern method.  */
     {
-      err = gpg_error_from_syserror ();
-      goto leave;
+      /* Note that we need to send some empty payload.  */
+      err = call_paypal (HTTP_REQ_POST, 1, access_token,
+                         hateoas_execute, NULL,
+                         NULL, "{ }",
+                         &status, &json);
     }
-  method = es_bsprintf ("payments/payment/%s/execute", paypal_id);
-  if (!request)
+  else /* The old method.  */
     {
-      err = gpg_error_from_syserror ();
-      goto leave;
-    }
+      err = get_string (*dict, "Paypal-Payer", &paypal_payer);
+      if (err)
+        goto leave;
 
-  err = call_paypal (HTTP_REQ_POST, 1, access_token,
-                     method, NULL,
-                     NULL, request,
-                     &status, &json);
+      request = es_bsprintf ("{ \"payer_id\": \"%s\" }", paypal_payer);
+      if (!request)
+        {
+          err = gpg_error_from_syserror ();
+          goto leave;
+        }
+      method = es_bsprintf ("payments/payment/%s/execute", paypal_id);
+      if (!request)
+        {
+          err = gpg_error_from_syserror ();
+          goto leave;
+        }
+
+      err = call_paypal (HTTP_REQ_POST, 1, access_token,
+                         method, NULL,
+                         NULL, request,
+                         &status, &json);
+    }
   if (err)
     goto leave;
   if (status != 200 && status != 201)
@@ -1181,29 +1527,74 @@ paypal_checkout_execute (keyvalue_t *dict)
     }
 
   /* Prepare return values.  */
-  err = keyvalue_put (dict, "Charge-Id", paypal_id);
-  if (err)
-    goto leave;
-
-  s = find_sale_id (json);
-  if (!s)
+  if (hateoas_execute)  /* The modern method.  */
     {
-      log_error ("paypal: sale id missing in result\n");
-      err = gpg_error (GPG_ERR_GENERAL);
-      goto leave;
-    }
-  /* We store Paypal's sale id in Stripe's balance transaction field.  */
-  err = keyvalue_put (dict, "balance-transaction", s);
-  if (err)
-    goto leave;
+      cjson_t j_obj;
 
-  /* If Paypal returned an Email addree store that; if not delete the
-   * email field.  */
+      j_obj = cJSON_GetObjectItem (json, "id");
+      if (!j_obj || !cjson_is_string (j_obj) || !*j_obj->valuestring)
+        {
+          log_error ("paypal: subscription id missing in result\n");
+          err = gpg_error (GPG_ERR_INV_OBJ);
+          goto leave;
+        }
+      err = keyvalue_put (dict, "Charge-Id", j_obj->valuestring);
+      if (err)
+        goto leave;
+      err = keyvalue_del (*dict, "balance-transaction");
+      if (err)
+        goto leave;
+    }
+  else /* The old method.  */
+    {
+      err = keyvalue_put (dict, "Charge-Id", paypal_id);
+      if (err)
+        goto leave;
+
+      s = find_sale_id (json);
+      if (!s)
+        {
+          log_error ("paypal: sale id missing in result\n");
+          err = gpg_error (GPG_ERR_GENERAL);
+          goto leave;
+        }
+      /* We store Paypal's sale id in Stripe's balance
+       * transaction field.  */
+      err = keyvalue_put (dict, "balance-transaction", s);
+      if (err)
+        goto leave;
+    }
+
+  /* If Paypal returned an Email address store/update that; if not
+   * delete the email field.  */
   s = find_email (json);
   err = keyvalue_put (dict, "Email", s);
   if (err)
     goto leave;
 
+  /* If this is a subscription we have an account id item - update the
+   * account database.  */
+  if (account_id)
+    {
+      err = keyvalue_put (&accountdict, "Email", s);
+      if (err)
+        goto leave;
+      err = keyvalue_put (&accountdict, "account-id", account_id);
+      if (err)
+        goto leave;
+      s = find_payer_id (json);
+      err = keyvalue_put (&accountdict, "_paypal_payer_id", s);
+      if (err)
+        goto leave;
+      err = account_update_record (accountdict);
+      if (err)
+        goto leave;
+
+      /* Also return that value.  */
+      err = keyvalue_put (dict, "account-id", account_id);
+      if (err)
+        goto leave;
+    }
 
   err = keyvalue_put (dict, "Live", opt.livemode?"t":"f");
 
@@ -1212,6 +1603,7 @@ paypal_checkout_execute (keyvalue_t *dict)
   xfree (method);
   xfree (request);
   keyvalue_release (state);
+  keyvalue_release (accountdict);
   xfree (sessid);
   xfree (paypal_payer);
   return err;

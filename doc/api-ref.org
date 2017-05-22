@@ -129,6 +129,23 @@ prefix.  The return value as the additional let "_plan-id".
 
 PayPal Checkout.  See the source for details. FIXME.
 
+#+begin_example
+PPCHECKOUT prepare
+Amount:     42.50
+Currency:   EUR
+Desc:       Donation towards Payproc development
+Meta[Mail]: foo@example.org
+Return-Url: https://gnupg.org/cgi-bin/procdonate.cgi?mode=confirm-paypal
+Cancel-Url: https://gnupg.org/cgi-bin/procdonate.cgi?mode=cancel-paypal
+Paypal-Xp:  XP-NBWZ-QR6Z-8CXV-Q8XS
+#+end_example
+
+Optional items: Session-Id
+
+access token 2017-05-18 08:46:23
+: A21AAEpPr2fqhAKGkQcsC4TE8MG-nvLjTy6mVZOATgqKUohoinSqwaqaLT9du2Jqrv2bpDDrQiSUlWaMcFYBhIP2Iu_NXKi2Q
+
+
 ** SEPAPREORDER
 
 #+begin_example

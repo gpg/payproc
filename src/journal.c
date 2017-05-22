@@ -50,7 +50,7 @@
    | 10 | service  | Payment service (0=n/a, 1=stripe.com,2=PayPal, |
    |    |          | 3=SEPA, 255=user (PAYMENT_SERVICE_xxx))        |
    | 11 | account  | Account number                                 |
-   | 12 | chargeid | Charge id                                      |
+   | 12 | chargeid | Charge-id / Paypal subscription id             |
    | 13 | txid     | Transaction id                                 |
    | 14 | rtxid    | Reference txid (e.g. for refunds)              |
    |    |          | For preorders, this is the Sepa-Ref            |

@@ -21,6 +21,8 @@
 #define PAYPAL_H
 
 /*-- paypal.c --*/
+gpg_error_t paypal_find_create_plan (keyvalue_t *dict);
+gpg_error_t paypal_create_subscription (keyvalue_t *dict);
 gpg_error_t paypal_checkout_prepare (keyvalue_t *dict);
 gpg_error_t paypal_checkout_execute (keyvalue_t *dict);
 
