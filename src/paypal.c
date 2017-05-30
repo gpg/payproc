@@ -1100,7 +1100,7 @@ paypal_create_subscription (keyvalue_t *dict)
     goto leave;
 
   /* The start_date must be on the next day.  */
-  start_date = get_full_isotime (64400);
+  start_date = get_full_isotime (86400);
   if (!start_date)
     {
       err = gpg_error_from_syserror ();
@@ -1122,7 +1122,7 @@ paypal_create_subscription (keyvalue_t *dict)
                          "      }"
                          "  },"
                          "  \"override_merchant_preferences\": {"
-                         "    \"cancel_url\": \"%s\","
+                         "    \"cancel_url\": \"%s%caliasid=%s\","
                          "    \"return_url\": \"%s%caliasid=%s\""
                          "  }"
                          "}",
@@ -1132,6 +1132,7 @@ paypal_create_subscription (keyvalue_t *dict)
                          plan_id,
                          email,
                          cancel_url,
+                         strchr (return_url, '?')? '&' : '?', aliasid,
                          return_url,
                          strchr (return_url, '?')? '&' : '?', aliasid);
   if (!request)
@@ -1315,7 +1316,7 @@ paypal_checkout_prepare (keyvalue_t *dict)
                          "  \"intent\":\"sale\","
                          "%s"
                          "  \"redirect_urls\": {"
-                         "    \"cancel_url\":\"%s\","
+                         "    \"cancel_url\":\"%s%caliasid=%s\","
                          "    \"return_url\":\"%s%caliasid=%s\""
                          "  }"
                          "}",
@@ -1323,6 +1324,8 @@ paypal_checkout_prepare (keyvalue_t *dict)
                          desc,
                          paypal_xp_snippet,
                          cancel_url,
+                         strchr (return_url, '?')? '&' : '?',
+                         aliasid,
                          return_url,
                          strchr (return_url, '?')? '&' : '?',
                          aliasid);
