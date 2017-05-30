@@ -261,6 +261,7 @@ encode (const char *text, estream_t fp)
               "<svg width=\"%0.2fcm\" height=\"%0.2fcm\""
               " viewBox=\"0 0 %d %d\"\n"
               "     preserveAspectRatio=\"none\" version=\"1.1\"\n"
+              "     shape-rendering=\"crispEdges\"\n"
               "     xmlns=\"http://www.w3.org/2000/svg\">\n"
               "  <g id=\"QRcode\">\n"
               "    <rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\""
