@@ -240,7 +240,7 @@ encode (const char *text, estream_t fp)
   unsigned int symwidth;
   float realwidth;
   const unsigned char *row;
-  unsigned int x, y;
+  unsigned int x, y, width, x2;
 
   code = QRcode_encodeString (text, 0, QR_ECLEVEL_M, QR_MODE_8, 1);
   if (!code)
@@ -276,12 +276,17 @@ encode (const char *text, estream_t fp)
       row = code->data + (y * code->width);
       for (x = 0; x < code->width; x++)
         {
-          if ((row[x] & 1))
-            es_fprintf (fp,
-                        "      <rect x=\"%d\" y=\"%d\""
-                        " width=\"1\" height=\"1\""
-                        " fill=\"#000000\"/>\n",
-                        SVG_MARGIN + x, SVG_MARGIN + y);
+          for (width=0, x2=x; (row[x2] & 1) && x2 < code->width; x2++, width++)
+            ;
+          if (width)
+            {
+              es_fprintf (fp,
+                          "      <rect x=\"%d\" y=\"%d\""
+                          " width=\"%d\" height=\"1\""
+                          " fill=\"#000000\"/>\n",
+                          SVG_MARGIN + x, SVG_MARGIN + y, width);
+              x += width - 1;
+            }
 	}
     }
 
