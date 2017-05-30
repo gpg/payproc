@@ -221,6 +221,26 @@ fi
 
 
 #
+# QRENCODE
+#
+PKG_CHECK_MODULES([QRENCODE],[libqrencode >= 3.0],
+                             [have_qrencode=yes],
+                             [have_qrencode=no])
+if test "$have_qrencode" = "yes"; then
+  AC_SUBST([QRENCODE_CFLAGS])
+  AC_SUBST([QRENCODE_LIBS])
+  :
+else
+  tmp=$(echo "$QRENCODE_PKG_ERRORS" | tr '\n' '\v' | sed 's/\v/\n*** /g')
+  AC_MSG_WARN([[
+***
+*** Libqrencode not found
+***
+*** $tmp]])
+fi
+
+
+#
 # GPGME
 #
 AM_PATH_GPGME("$NEED_GPGME_API:$NEED_GPGME_VERSION",
@@ -459,6 +479,13 @@ if test "$have_sqlite3" = "no"; then
    AC_MSG_NOTICE([[
 ***
 *** You need SQLite3 to build this program.
+***]])
+fi
+if test "$have_qrencode" = "no"; then
+   die=yes
+   AC_MSG_NOTICE([[
+***
+*** You need Libqrencode to build this program.
 ***]])
 fi
 if test "$have_gpgme" = "no"; then

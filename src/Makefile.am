@@ -18,7 +18,8 @@
 
 EXTRA_DIST = cJSON.readme tls-ca.pem
 
-bin_PROGRAMS = payprocd payproc-jrnl payproc-stat payproc-post ppipnhd
+bin_PROGRAMS = payprocd payproc-jrnl payproc-stat payproc-post ppipnhd \
+	       ppsepaqr
 noinst_PROGRAMS = $(module_tests) t-http
 noinst_LIBRARIES = libcommon.a libcommonpth.a
 dist_pkglibexec_SCRIPTS = geteuroxref
@@ -86,6 +87,10 @@ payproc_post_SOURCES = \
 ppipnhd_SOURCES = ppipnhd.c
 ppipnhd_CFLAGS =
 ppipnhd_LDADD =
+
+ppsepaqr_SOURCES = ppsepaqr.c
+ppsepaqr_CFLAGS = $(QRENCODE_CFLAGS) $(GPG_ERROR_CFLAGS)
+ppsepaqr_LDADD = $(QRENCODE_LIBS) -lm libcommon.a $(GPG_ERROR_LIBS)
 
 module_tests = t-util t-preorder t-encrypt
 
