@@ -47,6 +47,15 @@
  * access a new access token is retrieved.  */
 static int status_unauthorized_seen;
 
+/* An object to cache plan IDs.  */
+static struct
+{
+  int counter;
+  char *planname;
+  char *planid;
+} plan_cache[50];
+static int plan_counter;
+
 
 /* Perform a call to paypal.  REQ_METHOD is the HTTP request method to
  * use, AUTHSTRING is the colon delimited concatenation of client_id
@@ -666,14 +675,74 @@ get_access_token (char **r_access_token)
 }
 
 
+/* Cache a plan_id */
+static void
+cache_plan_id (const char *name, const char *plan_id)
+{
+  int idx;
+  char *plan_id_copy;
+  char *name_copy;
+  int low, low_idx;
+  char *tmp, *tmp2;  /* Helper to delay the free.  */
+
+  /* First that a copy to that we don't need to call a system function
+   * (free, strdup) while walking the list (thread-safeness).  */
+  plan_id_copy = xtrystrdup (plan_id);
+  if (!plan_id_copy)
+    return;  /* out of core */
+
+  /* First check whether we need to update an existing plan. */
+  for (idx=0; idx < DIM (plan_cache); idx++)
+    if (plan_cache[idx].planname && plan_cache[idx].planid
+        && !strcmp (plan_cache[idx].planname, name))
+      {
+        tmp = plan_cache[idx].planid;
+        plan_cache[idx].planid = plan_id_copy;
+        xfree (tmp);
+        return; /* Updated.  */
+      }
+
+  /* Second find a free slot and allocate a new entry.  */
+  name_copy = xtrystrdup (name);
+  if (!name_copy)
+    return;  /* out of core */
+
+  for (idx=0; idx < DIM (plan_cache); idx++)
+    if (!plan_cache[idx].planname)
+      {
+        plan_cache[idx].planname = name_copy;
+        plan_cache[idx].planid = plan_id_copy;
+        plan_cache[idx].counter = ++plan_counter;
+        return; /* New entry.  */
+      }
+
+  /* No entries found.  Recycle the oldest slot.  */
+  low = plan_counter;
+  low_idx = 0;
+  for (idx=0; idx < DIM (plan_cache); idx++)
+    if (plan_cache[idx].planname
+        && plan_cache[idx].counter < low)
+      {
+        low = plan_cache[idx].counter;
+        low_idx = idx;
+      }
+
+  tmp = plan_cache[low_idx].planname;
+  tmp2 = plan_cache[low_idx].planid;
+  plan_cache[low_idx].planname = name_copy;
+  plan_cache[low_idx].planid = plan_id_copy;
+  plan_cache[low_idx].counter = ++plan_counter;
+  xfree (tmp);
+  xfree (tmp2);
+}
+
+
 /* Find the id for a given plan with NAME.  ACCESS_TOKEN is the
  * access_token we will need.  On success 0 is returned and the ID of
  * the plan is stored as a malloced string at R_PLAN_ID.  If no
  * matching plan was found, 0 is returned and NULL stored at
  * R_PLAN_ID.  On error an error code is returned and also NULL stored
  * at R_PLAN_ID.
- *
- * FIXME: Add some caching.
  */
 static gpg_error_t
 find_plan (const char *name, const char *access_token, char **r_plan_id)
@@ -692,6 +761,21 @@ find_plan (const char *name, const char *access_token, char **r_plan_id)
 
   *r_plan_id = NULL;
 
+  /* First check the cache.  */
+  for (idx=0; idx < DIM (plan_cache); idx++)
+    if (plan_cache[idx].planname && plan_cache[idx].planid
+        && !strcmp (plan_cache[idx].planname, name))
+      {
+        *r_plan_id = xtrystrdup (plan_cache[idx].planid);
+        if (!*r_plan_id)
+          return gpg_error_from_syserror ();
+        /* Fixme: this debug outout is not thread-safe */
+        log_debug ("paypal: plan-cache: Found %s as %s at %d\n",
+                   plan_cache[idx].planname, plan_cache[idx].planid, idx);
+        return 0;
+      }
+
+  /* Then ask Paypal.  */
   do
     {
       es_free (method); method = NULL;
@@ -781,6 +865,7 @@ find_plan (const char *name, const char *access_token, char **r_plan_id)
     {
       *r_plan_id = last_plan_id;
       last_plan_id = NULL;
+      cache_plan_id (name, *r_plan_id);
     }
   cJSON_Delete (json);
   es_free (method);
@@ -969,6 +1054,7 @@ paypal_find_create_plan (keyvalue_t *dict)
     }
   log_info ("paypal: new plan '%s' with id '%s' activated\n",
             plan_name, plan_id);
+  cache_plan_id (plan_name, plan_id);
 
 
  leave:
