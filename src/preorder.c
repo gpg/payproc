@@ -225,7 +225,8 @@ open_preorder_db (void)
                             "currency TEXT NOT NULL,"
                             "desc     TEXT,"
                             "email    TEXT,"
-                            "meta     TEXT"
+                            "meta     TEXT,"
+                            "recur    INTEGER"
                             ")",
                             -1, &stmt, NULL);
   if (res)
@@ -245,10 +246,29 @@ open_preorder_db (void)
       return gpg_error (GPG_ERR_GENERAL);
     }
 
+  /* Add the new column recur to the table.  */
+  res = sqlite3_prepare_v2 (preorder_db,
+                            "ALTER TABLE preorder ADD COLUMN \n"
+                            "recur INTEGER",
+                            -1, &stmt, NULL);
+  if (!res)
+    {
+      res = sqlite3_step (stmt);
+      sqlite3_finalize (stmt);
+      if (res != SQLITE_DONE)
+        {
+          log_error ("error adding column to preorder table: %s\n",
+                     sqlite3_errstr (res));
+          close_preorder_db (1);
+          return gpg_error (GPG_ERR_GENERAL);
+        }
+    }
+
+
   /* Prepare an insert statement.  */
   res = sqlite3_prepare_v2 (preorder_db,
                             "INSERT INTO preorder VALUES ("
-                            "?1,?2,?3,NULL,0,?4,?5,?6,?7,?8"
+                            "?1,?2,?3,NULL,0,?4,?5,?6,?7,?8,?9"
                             ")",
                             -1, &stmt, NULL);
   if (res)
@@ -377,6 +397,9 @@ insert_preorder_record (keyvalue_t *dictp)
       else
         res = sqlite3_bind_text (preorder_insert_stmt, 8, buf, -1, es_free);
     }
+  if (!res)
+    res = sqlite3_bind_int (preorder_insert_stmt,
+                            9, atoi (keyvalue_get_string (dict, "Recur")));
 
   if (res)
     {
@@ -462,6 +485,8 @@ get_columns (sqlite3_stmt *stmt, int idx, keyvalue_t *dictp)
     err = get_text_column (stmt, idx, 8, "Email", dictp);
   if (!err)
     err = get_text_column (stmt, idx, 9, "Meta", dictp);
+  if (!err)
+    err = get_text_column (stmt, idx, 10, "Recur", dictp);
 
   return err;
 }
@@ -516,7 +541,17 @@ format_columns (sqlite3_stmt *stmt, int idx, keyvalue_t *dictp)
       else
         put_membuf_str (&mb, s);
     }
+
+  i = sqlite3_column_int (stmt, 10);
+  if (!i && sqlite3_errcode (preorder_db) == SQLITE_NOMEM)
+    {
+      err = gpg_error (GPG_ERR_ENOMEM);
+      goto leave;
+    }
+  put_membuf_printf (&mb, "|%d", i);
+
   put_membuf_chr (&mb, '|');
+
 
   {
     char *p;

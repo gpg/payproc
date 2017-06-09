@@ -228,7 +228,7 @@ main (int argc, char **argv)
   else if (cmd == aSepaPreorder)
     {
       if (!argc || argc > 4)
-        wrong_args ("--sepa-preorder AMOUNT [NAME [EMAIL [DESC]]]");
+        wrong_args ("--sepa-preorder AMOUNT[/RECUR] [NAME [EMAIL [DESC]]]");
       sepapreorder (argv[0],
                     argc > 1? argv[1] : "",
                     argc > 2? argv[2] : "",
@@ -469,22 +469,47 @@ listpreorder (const char *refstring)
 
 
 static void
-sepapreorder (const char *amountstr, const char *name,
+sepapreorder (const char *amountstr_arg, const char *name,
               const char *email, const char *desc)
 {
   gpg_error_t err;
   keyvalue_t input = NULL;
   keyvalue_t output = NULL;
   keyvalue_t kv;
+  char *amountstr;
+  char *p;
+  int recur = 0;
+
+  amountstr = xstrdup (amountstr_arg);
+
+
+  p = strchr (amountstr, '/');
+  if (p)
+    {
+      *p++ = 0;
+      recur = atoi (p);
+    }
 
   if (!*amountstr || !convert_amount (amountstr, 2))
     {
       log_error ("Syntax error in amount or value is not positive\n");
+      xfree (amountstr);
+      return;
+    }
+
+  switch (recur)
+    {
+    case 0: case 1: case 4: case 12: break;
+    default:
+      log_error ("Syntax error in RECUR suffix - must be 0, 1, 4, or 12\n");
+      xfree (amountstr);
       return;
     }
 
   /* Find reference.  */
   err = keyvalue_put (&input, "Amount", amountstr);
+  if (!err)
+    err = keyvalue_putf (&input, "Recur", "%d", recur);
   if (!err && *name)
     err = keyvalue_put (&input, "Meta[Name]", name);
   if (!err && *email)
@@ -502,4 +527,5 @@ sepapreorder (const char *amountstr, const char *name,
 
   keyvalue_release (input);
   keyvalue_release (output);
+  xfree (amountstr);
 }

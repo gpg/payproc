@@ -869,6 +869,7 @@ cmd_ppcheckout (conn_t conn, char *args)
 
    Amount:     The amount to charge with optional decimal fraction.
    Currency:   If given its value must be EUR.
+   Recur:      Optional recurrence value.
    Desc:       Optional description of the charge.
    Email:      Optional contact mail address of the customer
    Meta[NAME]: Meta data further described by NAME.  This is used to convey
