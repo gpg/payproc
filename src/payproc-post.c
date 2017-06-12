@@ -355,6 +355,7 @@ post_sepa (const char *refstring, const char *amountstr_arg)
   keyvalue_t kv;
   char *amountstr;
   int recur = 0;
+  int force_single = 0;
   char *p;
 
   amountstr = xstrdup (amountstr_arg);
@@ -367,6 +368,8 @@ post_sepa (const char *refstring, const char *amountstr_arg)
         recur = -1;
       else
         recur = atoi (p);
+      if (!recur && *p)
+        force_single = 1;
     }
 
   if (!*amountstr || !convert_amount (amountstr, 2))
@@ -399,6 +402,8 @@ post_sepa (const char *refstring, const char *amountstr_arg)
       else
         err = keyvalue_putf (&input, "Recur", "%d", recur);
     }
+  else if (!err && force_single)
+    err = keyvalue_put (&input, "Recur", "0");
 
   if (err)
     log_fatal ("keyvalue_put failed: %s\n", gpg_strerror (err));
