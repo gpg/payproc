@@ -62,6 +62,7 @@
 #include "journal.h"
 #include "membuf.h"
 #include "dbutil.h"
+#include "currency.h"
 #include "preorder.h"
 
 
@@ -822,15 +823,16 @@ preorder_list_records (keyvalue_t *dictp, unsigned int *r_count)
 /* Take the Sepa-Ref from NEWDATA and update the corresponding row with
    the other data from NEWDATA.  On error return an error code.  */
 gpg_error_t
-preorder_update_record (keyvalue_t newdata)
+preorder_update_record (keyvalue_t *newdata)
 {
   gpg_error_t err;
   char separef[9];
   const char *s;
   char *p;
   keyvalue_t olddata = NULL;
+  int recur;
 
-  s = keyvalue_get (newdata, "Sepa-Ref");
+  s = keyvalue_get (*newdata, "Sepa-Ref");
   if (!s || strlen (s) >= sizeof separef)
     return gpg_error (GPG_ERR_INV_LENGTH);
   strcpy (separef, s);
@@ -846,10 +848,53 @@ preorder_update_record (keyvalue_t newdata)
   if (err)
     goto leave;
 
+  s = keyvalue_get_string (olddata, "Recur");
+  if (!valid_recur_p (s, &recur))
+    {
+      err = keyvalue_put (newdata, "failure-mesg",
+                          "Invalid value for 'Recur' in preorder record");
+      if (!err)
+        err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+
+  /* Get the supplied Recur value and macth it with the preorder.  */
+  s = keyvalue_get_string (*newdata, "Recur");
+  if (!strcmp (s, "*") && !recur)
+    {
+      err = keyvalue_put (newdata, "failure-mesg",
+                          "Recurring donation but not claimed in preorder");
+      if (!err)
+        err = gpg_error (GPG_ERR_CONFLICT);
+      goto leave;
+    }
+  else if (!*s && recur)
+    {
+      err = keyvalue_put (newdata, "failure-mesg",
+                          "Single donation but preorder claims recurring");
+      if (!err)
+        err = gpg_error (GPG_ERR_CONFLICT);
+      goto leave;
+    }
+  else if (valid_recur_p (s, &recur))
+    {
+      /* RECUR updated - this overrides what we have in the preorder
+       * record.  */
+    }
+  else
+    {
+      err = keyvalue_put (newdata, "failure-mesg",
+                          "Invalid value for 'Recur' supplied");
+      if (!err)
+        err = gpg_error (GPG_ERR_MISSING_VALUE);
+      goto leave;
+    }
+
+
   /* Update OLDDATA with the actual amount so that we can put the
      correct amount into the log.  */
   err = keyvalue_put (&olddata, "Amount",
-                      keyvalue_get_string (newdata, "Amount"));
+                      keyvalue_get_string (*newdata, "Amount"));
   if (err)
     goto leave;
 
@@ -860,7 +905,7 @@ preorder_update_record (keyvalue_t newdata)
 
   /* FIXME: Unfortunately the journal function creates its own
      timestamp.  */
-  jrnl_store_charge_record (&olddata, PAYMENT_SERVICE_SEPA, 0);
+  jrnl_store_charge_record (&olddata, PAYMENT_SERVICE_SEPA, recur);
 
 
  leave:

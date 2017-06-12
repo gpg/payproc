@@ -960,6 +960,9 @@ cmd_sepapreorder (conn_t conn, char *args)
    Sepa-Ref:   The key referencing the preorder
    Amount:     The actual amount of the payment.
    Currency:   If given its value must be EUR.
+   Recur:      Optional: '*' indicates that the SEPA data indicates
+               a recurring donation of any kind.  Any other valid value
+               forces the use of that value.
 
    On success these items are returned:
 
@@ -976,6 +979,7 @@ cmd_commitpreorder (conn_t conn, char *args)
   keyvalue_t kv;
   const char *s;
   char *buf = NULL;
+  int recur = 0;
 
   (void)args;
 
@@ -983,6 +987,16 @@ cmd_commitpreorder (conn_t conn, char *args)
   if (!*s)
     {
       set_error (MISSING_VALUE, "Key 'Sepa-Ref' not given");
+      goto leave;
+    }
+
+  /* Check recurrance parameter  */
+  s = keyvalue_get_string (dict, "Recur");
+  if (!*s || !strcmp (s, "*"))
+    ; /* None or 'any kind'.  */
+  else if (!valid_recur_p (s, &recur))
+    {
+      set_error (MISSING_VALUE, "Invalid value for 'Recur'");
       goto leave;
     }
 
@@ -1022,7 +1036,7 @@ cmd_commitpreorder (conn_t conn, char *args)
   if (err)
     goto leave;
 
-  err = preorder_update_record (conn->dataitems);
+  err = preorder_update_record (&conn->dataitems);
 
  leave:
   if (err)

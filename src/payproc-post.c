@@ -208,7 +208,7 @@ main (int argc, char **argv)
   else if (cmd == aSepa)
     {
       if (argc != 2)
-        wrong_args ("--sepa REF AMOUNT");
+        wrong_args ("--sepa REF AMOUNT[/(RECUR|*)]");
       ascii_strupr (argv[0]);
       post_sepa (argv[0], argv[1]);
     }
@@ -325,8 +325,14 @@ send_request (const char *command, keyvalue_t indata, keyvalue_t *outdata)
 
   err = protocol_read_response (fp, outdata);
   if (err && (s=keyvalue_get (*outdata, "_errdesc")))
-    log_error ("Command failed: %s %s%s%s\n",
-               gpg_strerror (err), *s == '('?"":"(", s, *s == '('?"":")");
+    {
+      log_error ("Command failed: %s %s%s%s\n",
+                 gpg_strerror (err), *s == '('?"":"(", s, *s == '('?"":")");
+      if ((s=keyvalue_get (*outdata, "failure")))
+        log_info("                %s\n", s);
+      if ((s=keyvalue_get (*outdata, "failure-mesg")))
+        log_info("                %s\n", s);
+    }
   else if (err)
     log_error ("Error reading from payprocd: %s\n", gpg_strerror (err));
 
@@ -341,16 +347,42 @@ send_request (const char *command, keyvalue_t indata, keyvalue_t *outdata)
 
 
 static void
-post_sepa (const char *refstring, const char *amountstr)
+post_sepa (const char *refstring, const char *amountstr_arg)
 {
   gpg_error_t err;
   keyvalue_t input = NULL;
   keyvalue_t output = NULL;
   keyvalue_t kv;
+  char *amountstr;
+  int recur = 0;
+  char *p;
+
+  amountstr = xstrdup (amountstr_arg);
+
+  p = strchr (amountstr, '/');
+  if (p)
+    {
+      *p++ = 0;
+      if (!strcmp (p, "*"))
+        recur = -1;
+      else
+        recur = atoi (p);
+    }
 
   if (!*amountstr || !convert_amount (amountstr, 2))
     {
       log_error ("Syntax error in amount or value is not positive\n");
+      xfree (amountstr);
+      return;
+    }
+
+  switch (recur)
+    {
+    case -1: break;
+    case 0: case 1: case 4: case 12: break;
+    default:
+      log_error ("Syntax error in RECUR suffix - must be 0, 1, 4, 12 or *\n");
+      xfree (amountstr);
       return;
     }
 
@@ -360,6 +392,14 @@ post_sepa (const char *refstring, const char *amountstr)
     err = keyvalue_put (&input, "Amount", amountstr);
   if (!err)
     err = keyvalue_put (&input, "Currency", "EUR");
+  if (!err && recur)
+    {
+      if (recur == -1)
+        err = keyvalue_put (&input, "Recur", "*");
+      else
+        err = keyvalue_putf (&input, "Recur", "%d", recur);
+    }
+
   if (err)
     log_fatal ("keyvalue_put failed: %s\n", gpg_strerror (err));
 
@@ -371,6 +411,7 @@ post_sepa (const char *refstring, const char *amountstr)
 
   keyvalue_release (input);
   keyvalue_release (output);
+  xfree (amountstr);
 }
 
 
@@ -437,9 +478,12 @@ listpreorder (const char *refstring)
                 continue; /* Skip an empty last field.  */
               switch (i)
                 {
-                case 1: /* Created.   */
-                case 2: /* Last Paid - print only date.  */
+                case 1: /* Created - print only date.   */
                   es_printf (" %10.10s |", s );
+                  break;
+                case 2: /* Last Paid - print time and date to ease
+                         * sorting.  */
+                  es_printf (" %19.19s |", s );
                   break;
                 case 4:
                   t = strchr (s, '.');

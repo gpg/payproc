@@ -21,7 +21,7 @@
 #define PREORDER_H
 
 gpg_error_t preorder_store_record (keyvalue_t *dictp);
-gpg_error_t preorder_update_record (keyvalue_t dict);
+gpg_error_t preorder_update_record (keyvalue_t *dict);
 gpg_error_t preorder_get_record (keyvalue_t *dictp);
 gpg_error_t preorder_list_records (keyvalue_t *dictp, unsigned int *r_count);
 
