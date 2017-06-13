@@ -330,7 +330,16 @@ parse_fieldname (char *name, int *r_meta, unsigned int *r_fnr)
   *r_fnr = 0;
 
   s = name;
-  if (*s == '[')
+  if (!strcmp (s, "help"))
+    {
+      int i;
+
+      log_info ("Known field names:\n");
+      for (i=0; i < DIM(jrnl_field_names); i++)
+        log_info ("  %2d  %s\n", i, jrnl_field_names[i]);
+      exit (1);
+    }
+  else if (*s == '[')
     {
       *r_meta = 1;
       for (p=name, ++s; *s && *s != ']';)
