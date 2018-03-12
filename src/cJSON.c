@@ -1,29 +1,30 @@
-/*
-  Copyright (c) 2009 Dave Gamble
+/* cJSON.c - JSON parser in C.
+ * Copyright (c) 2009 Dave Gamble
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files (the "Software"), to deal
-  in the Software without restriction, including without limitation the rights
-  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-  copies of the Software, and to permit persons to whom the Software is
-  furnished to do so, subject to the following conditions:
-
-  The above copyright notice and this permission notice shall be included in
-  all copies or substantial portions of the Software.
-
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-  THE SOFTWARE.
-*/
-
-/* cJSON */
-/* JSON parser in C. */
-
-#include <config.h>
+#ifdef HAVE_CONFIG_H
+# include <config.h>
+#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -34,7 +35,7 @@
 #include <ctype.h>
 #include <errno.h>
 
-#include "util.h"
+#include "util.h"     /* (Payproc specific.)  */
 #include "cJSON.h"
 
 static int
@@ -78,7 +79,8 @@ cJSON_Delete (cJSON * c)
     }
 }
 
-/* Parse the input text to generate a number, and populate the result into item. */
+/* Parse the input text to generate a number, and populate the result
+ * into item. */
 static const char *
 parse_number (cJSON * item, const char *num)
 {
@@ -111,7 +113,8 @@ parse_number (cJSON * item, const char *num)
 	subscale = (subscale * 10) + (*num++ - '0');	/* Number? */
     }
 
-  n = sign * n * pow (10.0, (scale + subscale * signsubscale));	/* number = +/- number.fraction * 10^+/- exponent */
+  /* number = +/- number.fraction * 10^+/- exponent */
+  n = sign * n * pow (10.0, (scale + subscale * signsubscale));
 
   item->valuedouble = n;
   item->valueint = (int) n;
@@ -128,7 +131,8 @@ print_number (cJSON * item)
   if (fabs (((double) item->valueint) - d) <= DBL_EPSILON && d <= INT_MAX
       && d >= INT_MIN)
     {
-      str = (char *) xtrymalloc (21);	/* 2^64+1 can be represented in 21 chars. */
+      /* 2^64+1 can be represented in 21 chars. */
+      str = (char *) xtrymalloc (21);
       if (str)
 	sprintf (str, "%d", item->valueint);
     }
@@ -252,7 +256,7 @@ parse_string (cJSON * item, const char *str, const char **ep)
 	      if ((uc >= 0xDC00 && uc <= 0xDFFF) || uc == 0)
 		break;		/* check for invalid.   */
 
-	      if (uc >= 0xD800 && uc <= 0xDBFF)	/* UTF16 surrogate pairs.       */
+	      if (uc >= 0xD800 && uc <= 0xDBFF)	/* UTF16 surrogate pairs. */
 		{
 		  if (ptr[1] != '\\' || ptr[2] != 'u')
 		    break;	/* missing second-half of surrogate.    */
@@ -1207,7 +1211,8 @@ cJSON_Duplicate (cJSON * item, int recurse)
   cptr = item->child;
   while (cptr)
     {
-      newchild = cJSON_Duplicate (cptr, 1);	/* Duplicate (with recurse) each item in the ->next chain */
+      /* Duplicate (with recurse) each item in the ->next chain */
+      newchild = cJSON_Duplicate (cptr, 1);
       if (!newchild)
 	{
 	  cJSON_Delete (newitem);
@@ -1215,14 +1220,17 @@ cJSON_Duplicate (cJSON * item, int recurse)
 	}
       if (nptr)
 	{
+          /* If newitem->child already set,
+           * then crosswire ->prev and ->next and move on.  */
 	  nptr->next = newchild, newchild->prev = nptr;
 	  nptr = newchild;
-	}			/* If newitem->child already set, then crosswire ->prev and ->next and move on */
+	}
       else
 	{
+          /* Set newitem->child and move to it.  */
 	  newitem->child = newchild;
 	  nptr = newchild;
-	}			/* Set newitem->child and move to it */
+	}
       cptr = cptr->next;
     }
   return newitem;
@@ -1237,20 +1245,20 @@ cJSON_Minify (char *json)
       if (*json == ' ')
 	json++;
       else if (*json == '\t')
-	json++;			// Whitespace characters.
+	json++;			/* Whitespace characters.  */
       else if (*json == '\r')
 	json++;
       else if (*json == '\n')
 	json++;
       else if (*json == '/' && json[1] == '/')
 	while (*json && *json != '\n')
-	  json++;		// double-slash comments, to end of line.
+	  json++;		/* Double-slash comments, to end of line.  */
       else if (*json == '/' && json[1] == '*')
 	{
 	  while (*json && !(*json == '*' && json[1] == '/'))
 	    json++;
 	  json += 2;
-	}			// multiline comments.
+	}			/* Multiline comments.  */
       else if (*json == '\"')
 	{
 	  *into++ = *json++;
@@ -1261,9 +1269,9 @@ cJSON_Minify (char *json)
 	      *into++ = *json++;
 	    }
 	  *into++ = *json++;
-	}			// string literals, which are \" sensitive.
+	}			/* String literals, which are \" sensitive.  */
       else
-	*into++ = *json++;	// All other characters.
+	*into++ = *json++;	/* All other characters.  */
     }
-  *into = 0;			// and null-terminate.
+  *into = 0;			/* and null-terminate.  */
 }
